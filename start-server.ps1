@@ -13,6 +13,59 @@ $root     = $PSScriptRoot
 $template = Join-Path $root "server-template"
 $run      = Join-Path $root "run"
 $pluginDir = Join-Path $root "plugin"
+# Markeert het java-proces, zodat dit script een server uit deze map later terugvindt
+$marker   = "-Dslopslurper.run=$run"
+
+function Get-RunningServers {
+    Get-CimInstance Win32_Process -Filter "Name='java.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -and $_.CommandLine.Contains($marker) }
+}
+
+function Get-ServerPort {
+    foreach ($f in @((Join-Path $run "server.properties"), (Join-Path $template "server.properties"))) {
+        if (Test-Path $f) {
+            $m = Select-String -Path $f -Pattern '^server-port=(\d+)' | Select-Object -First 1
+            if ($m) { return [int]$m.Matches[0].Groups[1].Value }
+            break
+        }
+    }
+    return 25565
+}
+
+function Test-PortInUse([int]$port) {
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $async = $client.BeginConnect("127.0.0.1", $port, $null, $null)
+        if ($async.AsyncWaitHandle.WaitOne(1000)) { $client.EndConnect($async); return $true }
+        return $false
+    } catch {
+        return $false
+    } finally {
+        $client.Close()
+    }
+}
+
+# 0. Een server van een vorige start die nog draait (nog aan het afsluiten, of open in een
+#    ander venster) houdt de poort bezet. Die eerst stoppen, vóór -Reset run/ weggooit.
+$old = @(Get-RunningServers)
+if ($old.Count -gt 0) {
+    foreach ($p in $old) {
+        Write-Host "Er draait nog een server van een vorige start (PID $($p.ProcessId)). Wachten tot die afgesloten is..."
+    }
+    $ids = $old | ForEach-Object { $_.ProcessId }
+    Wait-Process -Id $ids -Timeout 30 -ErrorAction SilentlyContinue
+    foreach ($id in $ids) {
+        if (Get-Process -Id $id -ErrorAction SilentlyContinue) {
+            Write-Warning "Server (PID $id) is na 30s nog niet gestopt en wordt geforceerd afgesloten."
+            Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $id -Timeout 10 -ErrorAction SilentlyContinue
+        }
+    }
+}
+$port = Get-ServerPort
+if (Test-PortInUse $port) {
+    Write-Error "Poort $port is al in gebruik door een ander programma, de server kan niet starten. Zoek het met 'Get-NetTCPConnection -LocalPort $port' en stop het, of zet een andere server-port in run\server.properties."
+}
 
 function Get-JavaMajor([string]$javaExe) {
     # java -version schrijft naar stderr; in PowerShell 5.1 mag dat niet als fout tellen
@@ -87,5 +140,14 @@ New-Item -ItemType Directory -Force $sockTmp | Out-Null
 
 Push-Location $run
 try {
-    & $java "-Djdk.net.unixdomain.tmpdir=$sockTmp" "-Xms1G" "-Xmx$Memory" -jar paper.jar --nogui
-} finally { Pop-Location }
+    & $java $marker "-Djdk.net.unixdomain.tmpdir=$sockTmp" "-Xms1G" "-Xmx$Memory" -jar paper.jar --nogui
+} finally {
+    # Na Ctrl+C geeft PowerShell de prompt meteen terug terwijl Java nog aan het afsluiten is
+    # (wereld opslaan, poort vrijgeven). Wachten tot de server echt weg is.
+    $still = @(Get-RunningServers)
+    if ($still.Count -gt 0) {
+        Write-Host "Server wordt afgesloten, even wachten..."
+        Wait-Process -Id ($still | ForEach-Object { $_.ProcessId }) -ErrorAction SilentlyContinue
+    }
+    Pop-Location
+}

@@ -38,7 +38,9 @@ Het script:
 3. kopieert de nieuwe plugin-jar naar `run/plugins/`;
 4. start de server.
 
-Verbind daarna in Minecraft met `localhost`. Typ `stop` in de console om de server af te sluiten.
+Verbind daarna in Minecraft met `localhost`. Typ `stop` in de console (of druk Ctrl+C) om de server af te sluiten.
+
+Draait er nog een server van een vorige start (bijvoorbeeld nog aan het afsluiten, gepauzeerd met Ctrl+Z of open in een ander venster), dan sluit het script die eerst af voordat het opnieuw bouwt, reset of start. Is de poort bezet door een ander programma, dan stopt het script met een duidelijke melding.
 
 Opties:
 
