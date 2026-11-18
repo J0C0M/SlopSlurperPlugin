@@ -1,5 +1,6 @@
 package com.slopslurper.plugin.storage;
 
+import com.slopslurper.plugin.storage.stats.ChunkHeat;
 import com.slopslurper.plugin.storage.stats.CountEntry;
 import com.slopslurper.plugin.storage.stats.Overview;
 import com.slopslurper.plugin.storage.stats.PlayerDetail;
@@ -225,6 +226,28 @@ public final class SqliteDataStore implements DataStore {
                 }
             }
             return Optional.of(new PlayerDetail(found.get(0), blocks, tools, worlds, activity));
+        });
+    }
+
+    @Override
+    public CompletableFuture<List<ChunkHeat>> getBlockBreakHeatmap(UUID player) {
+        // Chunk = floor(x / 16). Met pure integer-rekenkunde, zodat negatieve
+        // coördinaten ook goed gaan (SQLite deelt richting nul af).
+        String chunkX = "((x - (((x % 16) + 16) % 16)) / 16)";
+        String chunkZ = "((z - (((z % 16) + 16) % 16)) / 16)";
+        String sql = "SELECT world, " + chunkX + " AS cx, " + chunkZ + " AS cz, COUNT(*), MIN(y), MAX(y) "
+                + "FROM block_breaks " + (player != null ? "WHERE player_uuid = ? " : "")
+                + "GROUP BY world, cx, cz";
+        return query(() -> {
+            List<ChunkHeat> result = new ArrayList<>();
+            try (PreparedStatement ps = player != null ? prepare(sql, player.toString()) : prepare(sql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new ChunkHeat(rs.getString(1), rs.getInt(2), rs.getInt(3),
+                            rs.getLong(4), rs.getInt(5), rs.getInt(6)));
+                }
+            }
+            return result;
         });
     }
 

@@ -48,6 +48,7 @@ Opties:
 |---|---|---|
 | `-Reset` | `--reset` | Gooit `run/` weg en begint opnieuw met de verse templatewereld |
 | `-NoBuild` | `--no-build` | Start zonder de plugin opnieuw te bouwen |
+| `-NoBlueMap` | `--no-bluemap` | BlueMap (3D-kaart) niet downloaden |
 | `-Memory 4G` | `MEMORY=4G ./start-server.sh` | Meer geheugen voor de server |
 
 Als PowerShell het script blokkeert, start je het met `powershell -ExecutionPolicy Bypass -File .\start-server.ps1`.
@@ -67,6 +68,19 @@ De plugin slaat op welke blokken spelers breken in `run/plugins/SlopSlurperPlugi
 
 Het dashboard is standaard alleen bereikbaar vanaf je eigen pc. De poort en het adres stel je in via `run/plugins/SlopSlurperPlugin/config.yml`.
 
+### 3D-kaart (BlueMap)
+
+Op de dashboardpagina **3D-kaart** zie je de wereld in 3D, met een heatmap van waar blokken gebroken zijn. Elke chunk is een gekleurde kolom, van blauw (weinig) naar rood (veel). De kaart komt van [BlueMap](https://bluemap.bluecolored.de/).
+
+- Het startscript downloadt **BlueMap 5.16** eenmalig naar `run/plugins/`. Dat is de laatste versie die 1.21.11 ondersteunt. De download wordt gecontroleerd met een checksum.
+- **Eenmalig zelf doen:** BlueMap moet de textures van Minecraft downloaden. Daarvoor moet je zelf akkoord gaan met de [Minecraft EULA](https://aka.ms/MinecraftEULA):
+  1. Start de server één keer. BlueMap maakt dan zijn configuratie aan.
+  2. Zet in `run/plugins/BlueMap/core.conf` `accept-download: false` op `true` en sla het bestand op.
+  3. Start de server opnieuw. BlueMap rendert de wereld, wat de eerste keer even duurt.
+- De losse kaart draait op http://localhost:8100/. De heatmap wordt elke minuut bijgewerkt. In BlueMap zet je hem aan of uit via het lagen-menu ("SlopSlurper: gebroken blokken").
+- Let op: BlueMap is standaard bereikbaar vanaf je hele netwerk. Wil je dat niet, zet dan in `run/plugins/BlueMap/webserver.conf` `ip: "127.0.0.1"`.
+- Geen 3D-kaart nodig? Start met `-NoBlueMap`, of verwijder `run/plugins/bluemap-5.16-paper.jar`. De plugin werkt ook zonder BlueMap.
+
 ### API
 
 Het dashboard haalt alles uit een JSON-API. Wil je later een andere frontend of een centrale webapp bouwen, dan is dit het contract:
@@ -76,6 +90,8 @@ Het dashboard haalt alles uit een JSON-API. Wil je later een andere frontend of 
 | `GET /api/overview` | Totalen, top-blokken en meest actieve spelers |
 | `GET /api/players` | Alle spelers met totaal en laatst actief |
 | `GET /api/players/{uuid}?days=14` | Details van één speler, met activiteit per uur over de laatste N dagen |
+| `GET /api/heatmap[?player={uuid}]` | Gebroken blokken per chunk (wereld, chunk x/z, aantal, min/max y) |
+| `GET /api/config` | Instellingen voor de frontend, bijvoorbeeld of de 3D-kaart beschikbaar is |
 
 ### Opbouw
 

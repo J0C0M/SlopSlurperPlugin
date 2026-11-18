@@ -2,11 +2,18 @@
 # Gebruik:  .\start-server.ps1            (bouwen + starten)
 #           .\start-server.ps1 -Reset     (run/ weggooien en opnieuw uit server-template/ halen)
 #           .\start-server.ps1 -NoBuild   (alleen starten, plugin niet opnieuw bouwen)
+#           .\start-server.ps1 -NoBlueMap (BlueMap 3D-kaart niet downloaden)
 param(
     [switch]$Reset,
     [switch]$NoBuild,
+    [switch]$NoBlueMap,
     [string]$Memory = "2G"
 )
+
+# BlueMap 5.16 is de laatste versie die Minecraft 1.21.11 ondersteunt
+$blueMapJar    = "bluemap-5.16-paper.jar"
+$blueMapUrl    = "https://cdn.modrinth.com/data/swbUV1cr/versions/Vb2ZE8bR/bluemap-5.16-paper.jar"
+$blueMapSha512 = "4336174ede66d4c2f14d1830c068b7a8229afd0dd5e736526246486c1e3ff28eeed6c8044e74ddc81b5067a055a153189006389f5d3e70f434138fe7753628f2"
 
 $ErrorActionPreference = "Stop"
 $root     = $PSScriptRoot
@@ -131,6 +138,31 @@ if (Test-Path $jar) {
     Copy-Item -Force $jar (Join-Path $run "plugins\SlopSlurperPlugin.jar")
 } else {
     Write-Warning "Geen plugin-jar gevonden in plugin\target. Server start zonder plugin."
+}
+
+# 4b. BlueMap (3D-kaart) eenmalig downloaden, met checksum-controle.
+#     Mislukt de download, dan start de server gewoon zonder BlueMap.
+if (-not $NoBlueMap) {
+    $blueMapPath = Join-Path $run "plugins\$blueMapJar"
+    if (-not (Test-Path $blueMapPath)) {
+        Write-Host "BlueMap downloaden (eenmalig, ~6 MB)..."
+        $tmp = "$blueMapPath.download"
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -Uri $blueMapUrl -OutFile $tmp -UseBasicParsing
+            $hash = (Get-FileHash $tmp -Algorithm SHA512).Hash.ToLower()
+            if ($hash -ne $blueMapSha512) { throw "checksum klopt niet" }
+            Move-Item -Force $tmp $blueMapPath
+            Write-Host "BlueMap geinstalleerd."
+        } catch {
+            Remove-Item -Force $tmp -ErrorAction SilentlyContinue
+            Write-Warning "BlueMap downloaden mislukt ($($_.Exception.Message)). Server start zonder 3D-kaart."
+        }
+    }
+    $coreConf = Join-Path $run "plugins\BlueMap\core.conf"
+    if ((Test-Path $coreConf) -and (Select-String -Path $coreConf -Pattern '^accept-download:\s*false' -Quiet)) {
+        Write-Warning "BlueMap wacht op jouw akkoord: zet 'accept-download: true' in run\plugins\BlueMap\core.conf (zie README)."
+    }
 }
 
 # 5. Server starten. De korte tmp-map voorkomt een bekende Windows-fout

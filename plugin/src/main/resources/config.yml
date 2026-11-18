@@ -7,3 +7,6 @@ dashboard:
   # 0.0.0.0   = bereikbaar voor iedereen op je netwerk (let op: spelersdata wordt dan zichtbaar).
   host: 127.0.0.1
   port: 8080
+  # Adres van de BlueMap 3D-kaart (alleen gebruikt als de BlueMap-plugin geïnstalleerd is).
+  # Het dashboard toont deze kaart op de pagina "3D-kaart".
+  bluemap-url: "http://localhost:8100/"
