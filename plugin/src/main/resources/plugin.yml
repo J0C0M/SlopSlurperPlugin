@@ -3,3 +3,17 @@ version: '${project.version}'
 main: com.slopslurper.plugin.SlopSlurperPlugin
 api-version: '1.21.11'
 description: ${project.description}
+
+commands:
+  blockstats:
+    description: Laat zien welke blokken een speler het meest breekt.
+    usage: /blockstats [speler]
+    permission: slopslurper.blockstats
+
+permissions:
+  slopslurper.blockstats:
+    description: Eigen blokstatistieken bekijken.
+    default: true
+  slopslurper.blockstats.others:
+    description: Blokstatistieken van andere spelers bekijken.
+    default: op
