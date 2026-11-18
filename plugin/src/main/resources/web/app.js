@@ -63,10 +63,40 @@
             (name || "?").charAt(0).toUpperCase());
     }
 
-    function kpi(label, value) {
+    function kpi(label, value, sub) {
         return h("div", { class: "kpi" },
             h("div", { class: "kpi-label" }, label),
-            h("div", { class: "kpi-value" }, value));
+            h("div", { class: "kpi-value" }, value),
+            sub ? h("div", { class: "kpi-sub" }, sub) : null);
+    }
+
+    /** 9_000_000 ms -> "2 u 30 m" */
+    function duration(ms) {
+        if (!ms || ms < 60_000) return ms > 0 ? "< 1 m" : "0 m";
+        const totalMin = Math.round(ms / 60_000);
+        const hours = Math.floor(totalMin / 60);
+        const min = totalMin % 60;
+        return hours ? `${hours} u ${min} m` : `${min} m`;
+    }
+
+    function afkShare(afkMs, totalMs) {
+        if (!totalMs) return null;
+        return `${Math.round((afkMs / totalMs) * 100)}% AFK`;
+    }
+
+    const dateTimeFmt = new Intl.DateTimeFormat("nl-NL", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+    function endReason(reason) {
+        if (!reason) return "Speelt nog";
+        return {
+            DISCONNECTED: "Uitgelogd",
+            KICKED: "Gekickt",
+            TIMED_OUT: "Verbinding verloren",
+            ERRONEOUS_STATE: "Fout",
+            SERVER_CRASH: "Server gecrasht",
+            PLUGIN_STOP: "Server gestopt",
+            REPLACED: "Opnieuw ingelogd",
+        }[reason] ?? pretty(reason);
     }
 
     function card(title, content, wide = false) {
@@ -138,7 +168,7 @@
     async function renderOverview() {
         const [overview, players] = await Promise.all([api("/api/overview"), api("/api/players")]);
 
-        if (!overview || overview.totalBreaks === 0) {
+        if (!overview || overview.playerCount === 0) {
             return [
                 h("h1", {}, "Overzicht"),
                 h("p", { class: "subtitle" }, "Wat spelers op deze server doen."),
@@ -151,11 +181,13 @@
         const table = h("table", {},
             h("thead", {}, h("tr", {},
                 h("th", {}, "Speler"),
+                h("th", { class: "num" }, "Speeltijd"),
                 h("th", { class: "num" }, "Blokken gebroken"),
                 h("th", { class: "num" }, "Laatst actief"))),
             h("tbody", {}, players.map(p =>
                 h("tr", { onclick: () => { location.hash = `#/speler/${p.uuid}`; } },
                     h("td", {}, h("a", { href: `#/speler/${p.uuid}`, class: "player-cell" }, avatar(p.name), p.name)),
+                    h("td", { class: "num", title: afkShare(p.afkMs, p.playtimeMs) ?? "" }, duration(p.playtimeMs)),
                     h("td", { class: "num" }, nf.format(p.totalBreaks)),
                     h("td", { class: "num" }, timeAgo(p.lastActive))))));
 
@@ -163,6 +195,7 @@
             h("h1", {}, "Overzicht"),
             h("p", { class: "subtitle" }, "Wat spelers op deze server doen."),
             h("div", { class: "kpis" },
+                kpi("Speeltijd (totaal)", duration(overview.playtimeMs), afkShare(overview.afkMs, overview.playtimeMs)),
                 kpi("Blokken gebroken", nf.format(overview.totalBreaks)),
                 kpi("Spelers", nf.format(overview.playerCount)),
                 kpi("Meest gebroken blok", top ? pretty(top.key) : "–")),
@@ -170,6 +203,22 @@
                 card("Meest gebroken blokken", barList(overview.topBlocks)),
                 card("Spelers", h("div", { class: "table-wrap" }, table))),
         ];
+    }
+
+    function sessionTable(sessions) {
+        if (!sessions.length) return h("p", { class: "muted" }, "Nog geen sessies.");
+        return h("div", { class: "table-wrap" }, h("table", { class: "static" },
+            h("thead", {}, h("tr", {},
+                h("th", {}, "Begonnen"),
+                h("th", { class: "num" }, "Duur"),
+                h("th", { class: "num" }, "AFK"),
+                h("th", {}, "Einde"))),
+            h("tbody", {}, sessions.map(s =>
+                h("tr", {},
+                    h("td", {}, dateTimeFmt.format(new Date(s.startedAt))),
+                    h("td", { class: "num" }, duration(s.durationMs)),
+                    h("td", { class: "num" }, duration(s.afkMs)),
+                    h("td", {}, s.endedAt == null ? h("span", { class: "live" }, "● Speelt nog") : endReason(s.endReason)))))));
     }
 
     async function renderPlayer(uuid) {
@@ -191,10 +240,14 @@
                 avatar(p.name, true),
                 h("div", {}, h("h1", {}, p.name), h("p", {}, `Laatst actief ${timeAgo(p.lastActive)}`))),
             h("div", { class: "kpis" },
+                kpi("Speeltijd", duration(p.playtimeMs), afkShare(p.afkMs, p.playtimeMs)),
+                kpi("Sessies", nf.format(p.sessions),
+                    p.sessions ? `gem. ${duration(p.playtimeMs / p.sessions)}` : null),
                 kpi("Blokken gebroken", nf.format(p.totalBreaks)),
                 kpi("Favoriete blok", favBlock ? pretty(favBlock.key) : "–"),
                 kpi("Meest gebruikt", favTool ? pretty(favTool.key) : "–")),
             h("div", { class: "grid" },
+                card("Laatste sessies", sessionTable(detail.sessions || []), true),
                 card(`Blokken per dag (laatste ${DAYS} dagen)`, columnChart(perDay(detail.activity, DAYS), 2), true),
                 card("Wanneer speelt deze speler?", columnChart(perHourOfDay(detail.activity), 3), true),
                 card("Meest gebroken blokken", barList(detail.topBlocks)),

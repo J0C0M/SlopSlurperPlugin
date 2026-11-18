@@ -2,10 +2,10 @@ package com.slopslurper.plugin;
 
 import com.slopslurper.plugin.commands.BlockStatsCommand;
 import com.slopslurper.plugin.integrations.BlueMapHeatmap;
-import com.slopslurper.plugin.listeners.BlockBreakListener;
 import com.slopslurper.plugin.listeners.PlayerJoinListener;
 import com.slopslurper.plugin.storage.DataStore;
 import com.slopslurper.plugin.storage.SqliteDataStore;
+import com.slopslurper.plugin.trackers.TrackerManager;
 import com.slopslurper.plugin.web.WebServer;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -17,6 +17,7 @@ public final class SlopSlurperPlugin extends JavaPlugin {
     private static final long FLUSH_INTERVAL_TICKS = 20L * 5;
 
     private DataStore database;
+    private TrackerManager trackers;
     private WebServer webServer;
     private BlueMapHeatmap blueMapHeatmap;
     private boolean blueMapPresent;
@@ -24,6 +25,9 @@ public final class SlopSlurperPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        // Nieuwe instellingen (bijv. van een nieuwe tracker) aanvullen in een bestaande config.yml
+        getConfig().options().copyDefaults(true);
+        saveConfig();
 
         database = new SqliteDataStore(getDataFolder(), getLogger());
         try {
@@ -35,7 +39,9 @@ public final class SlopSlurperPlugin extends JavaPlugin {
         }
 
         getServer().getPluginManager().registerEvents(new PlayerJoinListener(this), this);
-        getServer().getPluginManager().registerEvents(new BlockBreakListener(database), this);
+
+        trackers = new TrackerManager(this, database);
+        trackers.startAll();
 
         BlockStatsCommand blockStats = new BlockStatsCommand(this, database);
         getCommand("blockstats").setExecutor(blockStats);
@@ -77,6 +83,10 @@ public final class SlopSlurperPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        // Eerst trackers stoppen (die kunnen nog laatste events wegschrijven), dan pas de database
+        if (trackers != null) {
+            trackers.stopAll();
+        }
         if (webServer != null) {
             webServer.stop();
         }

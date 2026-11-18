@@ -61,10 +61,19 @@ Als PowerShell het script blokkeert, start je het met `powershell -ExecutionPoli
 
 ## Data en dashboard
 
-De plugin slaat op welke blokken spelers breken in `run/plugins/SlopSlurperPlugin/data.db` (SQLite).
+De plugin slaat spelersdata op in `run/plugins/SlopSlurperPlugin/data.db` (SQLite). Elke tracker voegt daar zijn eigen soort data aan toe:
+
+| Tracker | Wat | Instellingen |
+|---|---|---|
+| `sessions` | Sessies van join tot quit: speeltijd, AFK-tijd en de reden van uitloggen. Events `session_start`, `session_end`, `afk_start` en `afk_end`. | `afk-timeout-seconds` (180), `checkpoint-seconds` (60) |
+| `block-break` | Elk gebroken blok: type, plek en gereedschap. | – |
+
+**Over AFK:** iemand is AFK na `afk-timeout-seconds` zonder echte input. Als input telt: rondkijken, zelf lopen, springen, klikken, interacties, inventory, chat, commando's, sneaken, sprinten en van hotbar-slot wisselen. Meegevoerd worden door water, een minecart of een boot telt niet, dus AFK-pools werken niet om speeltijd te faken. De AFK-tijd telt terug vanaf de laatste input: wie 3 minuten stilstaat, heeft 3 minuten AFK.
+
+**Bij een crash:** lopende sessies worden elke `checkpoint-seconds` tussentijds opgeslagen. Na een crash sluit de plugin ze bij de volgende start af op dat laatste moment, met als reden `SERVER_CRASH`.
 
 - **In-game:** `/blockstats` toont je eigen top 10, `/blockstats <speler>` die van een ander (alleen voor op).
-- **Dashboard:** zodra de server draait, open je **http://localhost:8080/**. Daar zie je een overzicht van alle spelers en per speler de top-blokken, gereedschap, werelden en activiteit per dag en per uur. De pagina ververst elke 10 seconden.
+- **Dashboard:** zodra de server draait, open je **http://localhost:8080/**. Daar zie je een overzicht van alle spelers met hun speeltijd. Per speler zie je speeltijd en AFK, de laatste sessies, de top-blokken, gereedschap, werelden en activiteit per dag en per uur. De pagina ververst elke 10 seconden.
 
 Het dashboard is standaard alleen bereikbaar vanaf je eigen pc. De poort en het adres stel je in via `run/plugins/SlopSlurperPlugin/config.yml`.
 
@@ -95,9 +104,43 @@ Het dashboard haalt alles uit een JSON-API. Wil je later een andere frontend of 
 
 ### Opbouw
 
-- `storage/DataStore`: de interface voor alle opslag. `SqliteDataStore` is nu de enige implementatie. Een centrale opslag (MySQL of een API) wordt later een tweede implementatie, zonder dat listeners of het dashboard veranderen.
+- `trackers/`: elke tracker verzamelt één soort data. `TrackerManager` start ze, en in `config.yml` zet je ze aan of uit (zie hieronder).
+- `storage/DataStore`: de interface voor alle opslag. `SqliteDataStore` is nu de enige implementatie. Een centrale opslag (MySQL of een API) wordt later een tweede implementatie, zonder dat trackers of het dashboard veranderen.
+- `storage/GameEvent`: het ene datamodel voor alles wat er gebeurt. Alles komt in één tabel, `events`, met kolommen `type`, `subtype`, speler, wereld, x/y/z, `item`, `game_mode`, `value`, `meta` (JSON) en `created_at`. De mogelijke `type`-waarden staan in `storage/EventTypes`.
+- `storage/SqliteMigrations`: schemawijzigingen. Bij het opstarten werkt elke `data.db` zichzelf bij. Vóór een migratie op bestaande data maakt de plugin automatisch een backup (`data.db.backup-v<versie>`).
 - `web/WebServer`: de ingebouwde webserver (JDK `HttpServer`, geen extra dependencies).
 - `src/main/resources/web/`: de dashboard-frontend in pure HTML, CSS en JS, zonder externe libraries of CDN.
+
+### Een tracker toevoegen
+
+1. Voeg een constante toe aan `storage/EventTypes`, bijvoorbeeld `MOB_KILL = "mob_kill"`.
+2. Maak in `trackers/` een klasse die `EventTracker` uitbreidt, met een `id()` (bijvoorbeeld `mob-kill`) en `@EventHandler`-methodes:
+   ```java
+   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+   public void onKill(EntityDeathEvent event) {
+       Player killer = event.getEntity().getKiller();
+       if (killer == null) return;
+       record(GameEvent.of(EventTypes.MOB_KILL, killer)
+               .subtype(event.getEntityType())
+               .at(event.getEntity().getLocation())
+               .build());
+   }
+   ```
+   `GameEvent.of(type, player)` vult al in: speler, positie, wereld, gamemode, item in de hand en het tijdstip.
+3. Registreer de tracker in `TrackerManager.TRACKERS`.
+4. Zet een blok in `src/main/resources/config.yml` onder `trackers:`. Bestaande configs krijgen dat bij de volgende start vanzelf.
+
+Een nieuwe tabel of kolom nodig? Voeg dan **onderaan** in `SqliteMigrations` een nieuwe migratie toe, met het volgende versienummer. Pas nooit een migratie aan die al gecommit is, want bij teamgenoten heeft die al gedraaid.
+
+### Trackers aan- of uitzetten
+
+In `run/plugins/SlopSlurperPlugin/config.yml`:
+```yaml
+trackers:
+  block-break:
+    enabled: false
+```
+Daarna herstart je de server. In de console zie je welke trackers aan staan: `Trackers aan: ...`.
 
 ## Afspraken
 

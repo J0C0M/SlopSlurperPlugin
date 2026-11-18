@@ -23,8 +23,17 @@ public interface DataStore {
 
     void close();
 
-    /** Zet een blokbreuk in de wachtrij. Veilig om vanaf de main thread aan te roepen. */
-    void queueBlockBreak(BlockBreakRecord record);
+    /**
+     * Zet een event in de wachtrij; het wordt binnen een paar seconden gebundeld weggeschreven.
+     * Veilig en goedkoop om vanaf de main thread (bijv. in een event listener) aan te roepen.
+     */
+    void recordEvent(GameEvent event);
+
+    /**
+     * Slaat de stand van een sessie op (nieuw of bijgewerkt, op basis van het id).
+     * Gaat via dezelfde wachtrij als events, dus ook goedkoop vanaf de main thread.
+     */
+    void saveSession(SessionRecord session);
 
     /** Schrijft de wachtrij weg op de achtergrond. */
     void flushAsync();

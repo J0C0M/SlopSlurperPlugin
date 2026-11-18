@@ -217,6 +217,10 @@ th { color: var(--muted); font-weight: 600; font-size: 13px; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--surface-2); }
+table.static tbody tr { cursor: default; }
+table.static tbody tr:hover { background: none; }
+.live { color: var(--accent); font-weight: 600; }
+.kpi-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
 tbody tr:last-child td { border-bottom: none; }
 
 .player-cell { display: flex; align-items: center; gap: 10px; text-decoration: none; font-weight: 600; }

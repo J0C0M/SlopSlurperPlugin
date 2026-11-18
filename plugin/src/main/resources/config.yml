@@ -10,3 +10,19 @@ dashboard:
   # Adres van de BlueMap 3D-kaart (alleen gebruikt als de BlueMap-plugin geïnstalleerd is).
   # Het dashboard toont deze kaart op de pagina "3D-kaart".
   bluemap-url: "http://localhost:8100/"
+
+# Trackers: elk verzamelt één soort data. Zet er een uit met enabled: false
+# en herstart de server. Een tracker die hier niet staat, staat aan.
+trackers:
+  # Sessies (join tot quit): speeltijd en AFK-tijd.
+  sessions:
+    enabled: true
+    # Na zoveel seconden zonder input telt iemand als AFK (terug vanaf zijn laatste input).
+    # 0 = nooit AFK.
+    afk-timeout-seconds: 180
+    # Hoe vaak een lopende sessie tussentijds wordt opgeslagen. Bij een crash gaat hooguit
+    # zoveel speeltijd verloren.
+    checkpoint-seconds: 60
+  # Elk blok dat een speler breekt (type, plek, gereedschap).
+  block-break:
+    enabled: true
