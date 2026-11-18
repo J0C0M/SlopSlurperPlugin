@@ -23,6 +23,10 @@
             <id>papermc</id>
             <url>https://repo.papermc.io/repository/maven-public/</url>
         </repository>
+        <repository>
+            <id>bluecolored</id>
+            <url>https://repo.bluecolored.de/releases</url>
+        </repository>
     </repositories>
 
     <dependencies>
@@ -30,6 +34,14 @@
             <groupId>io.papermc.paper</groupId>
             <artifactId>paper-api</artifactId>
             <version>${paper.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <!-- Optioneel: alleen gebruikt als de BlueMap-plugin op de server staat.
+             2.7.7 is de API-versie van BlueMap 5.16, de laatste release voor 1.21.11 -->
+        <dependency>
+            <groupId>de.bluecolored</groupId>
+            <artifactId>bluemap-api</artifactId>
+            <version>2.7.7</version>
             <scope>provided</scope>
         </dependency>
     </dependencies>

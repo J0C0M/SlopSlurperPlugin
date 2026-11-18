@@ -203,15 +203,60 @@
         ];
     }
 
+    /** BlueMap-URL die opent boven het drukste gebied van de overworld (gewogen gemiddelde). */
+    function blueMapStartUrl(baseUrl, cells) {
+        const overworld = cells.filter(c => c.world === "world");
+        const total = overworld.reduce((sum, c) => sum + c.count, 0);
+        if (!total) return baseUrl;
+        const x = Math.round(overworld.reduce((s, c) => s + (c.chunkX * 16 + 8) * c.count, 0) / total);
+        const z = Math.round(overworld.reduce((s, c) => s + (c.chunkZ * 16 + 8) * c.count, 0) / total);
+        // Formaat: #map:x:y:z:afstand:rotatie:hoek:tilt:ortho:modus
+        return `${baseUrl.replace(/#.*$/, "")}#world:${x}:64:${z}:180:0.6:0.9:0:0:perspective`;
+    }
+
+    async function renderMap() {
+        const [config, cells] = await Promise.all([api("/api/config"), api("/api/heatmap").catch(() => [])]);
+        const head = h("div", { class: "map-head" },
+            h("div", {},
+                h("h1", {}, "3D-kaart"),
+                h("p", { class: "subtitle" }, "Waar spelers blokken breken, als kolommen op de wereld.")),
+            h("div", { class: "legend" }, "weinig", h("span", { class: "legend-bar", "aria-hidden": "true" }), "veel"));
+
+        if (!config || !config.blueMapEnabled) {
+            return [h("div", { class: "map-page" }, head, h("div", { class: "card" }, empty("BlueMap staat niet aan",
+                "Installeer de BlueMap-plugin (versie 5.16 voor 1.21.11) op de server om hier de 3D-kaart te zien.")))];
+        }
+
+        return [h("div", { class: "map-page" },
+            head,
+            h("iframe", { class: "map-frame", src: blueMapStartUrl(config.blueMapUrl, cells || []), title: "BlueMap 3D-kaart van de wereld", allowfullscreen: "" }),
+            h("p", { class: "hint" },
+                "Elke kolom is een chunk (16×16 blokken), van de laagste tot de hoogste plek waar gegraven is. ",
+                "De heatmap wordt elke minuut bijgewerkt. Aan/uit via het lagen-menu in BlueMap (“SlopSlurper: gebroken blokken”). ",
+                h("a", { href: config.blueMapUrl, target: "_blank", rel: "noopener" }, "Open de kaart los ↗"))),
+        ];
+    }
+
     // ---------- Router + verversen ----------
 
     let renderId = 0;
+    const isMapRoute = () => location.hash === "#/kaart";
+
+    function updateNav() {
+        const active = isMapRoute() ? "map" : "overview";
+        document.querySelectorAll("[data-nav]").forEach(a => {
+            a.classList.toggle("active", a.dataset.nav === active);
+            if (a.dataset.nav === active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+        });
+    }
 
     async function render() {
         const id = ++renderId;
+        updateNav();
         const match = location.hash.match(/^#\/speler\/([0-9a-fA-F-]{36})$/);
         try {
-            const content = match ? await renderPlayer(match[1]) : await renderOverview();
+            const content = isMapRoute() ? await renderMap()
+                : match ? await renderPlayer(match[1]) : await renderOverview();
             if (id !== renderId) return; // inmiddels naar een andere pagina genavigeerd
             app.replaceChildren(...content);
             status.textContent = `Bijgewerkt om ${new Date().toLocaleTimeString("nl-NL")}`;
@@ -232,6 +277,7 @@
         window.scrollTo(0, 0);
         render();
     });
-    setInterval(() => { if (!document.hidden) render(); }, REFRESH_MS);
+    // De 3D-kaart niet automatisch verversen: dan zou het iframe steeds opnieuw laden
+    setInterval(() => { if (!document.hidden && !isMapRoute()) render(); }, REFRESH_MS);
     render();
 })();

@@ -1,6 +1,7 @@
 package com.slopslurper.plugin;
 
 import com.slopslurper.plugin.commands.BlockStatsCommand;
+import com.slopslurper.plugin.integrations.BlueMapHeatmap;
 import com.slopslurper.plugin.listeners.BlockBreakListener;
 import com.slopslurper.plugin.listeners.PlayerJoinListener;
 import com.slopslurper.plugin.storage.DataStore;
@@ -17,6 +18,8 @@ public final class SlopSlurperPlugin extends JavaPlugin {
 
     private DataStore database;
     private WebServer webServer;
+    private BlueMapHeatmap blueMapHeatmap;
+    private boolean blueMapPresent;
 
     @Override
     public void onEnable() {
@@ -40,6 +43,14 @@ public final class SlopSlurperPlugin extends JavaPlugin {
 
         getServer().getScheduler().runTaskTimer(this, database::flushAsync, FLUSH_INTERVAL_TICKS, FLUSH_INTERVAL_TICKS);
 
+        // BlueMap is optioneel. BlueMapHeatmap pas aanmaken (en dus de klasse laden)
+        // als de plugin er echt is, anders krijg je een NoClassDefFoundError.
+        blueMapPresent = getServer().getPluginManager().getPlugin("BlueMap") != null;
+        if (blueMapPresent) {
+            blueMapHeatmap = new BlueMapHeatmap(this, database);
+            blueMapHeatmap.start();
+        }
+
         startDashboard();
 
         getLogger().info("SlopSlurperPlugin is aan. Klaar om spelersdata te verzamelen.");
@@ -51,7 +62,8 @@ public final class SlopSlurperPlugin extends JavaPlugin {
         }
         String host = getConfig().getString("dashboard.host", "127.0.0.1");
         int port = getConfig().getInt("dashboard.port", 8080);
-        webServer = new WebServer(database, getLogger(), host, port);
+        String blueMapUrl = blueMapPresent ? getConfig().getString("dashboard.bluemap-url", "http://localhost:8100/") : null;
+        webServer = new WebServer(database, getLogger(), host, port, blueMapUrl);
         try {
             webServer.start();
             getLogger().info("Dashboard draait op " + webServer.url());
@@ -67,6 +79,9 @@ public final class SlopSlurperPlugin extends JavaPlugin {
     public void onDisable() {
         if (webServer != null) {
             webServer.stop();
+        }
+        if (blueMapHeatmap != null) {
+            blueMapHeatmap.stop();
         }
         if (database != null) {
             database.close();

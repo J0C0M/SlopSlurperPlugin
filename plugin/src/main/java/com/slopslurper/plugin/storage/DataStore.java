@@ -1,5 +1,6 @@
 package com.slopslurper.plugin.storage;
 
+import com.slopslurper.plugin.storage.stats.ChunkHeat;
 import com.slopslurper.plugin.storage.stats.Overview;
 import com.slopslurper.plugin.storage.stats.PlayerDetail;
 import com.slopslurper.plugin.storage.stats.PlayerSummary;
@@ -42,4 +43,11 @@ public interface DataStore {
      * @param activitySince alleen activiteit vanaf dit tijdstip (epoch ms) meenemen
      */
     CompletableFuture<Optional<PlayerDetail>> getPlayer(UUID player, int limit, long activitySince);
+
+    /**
+     * Gebroken blokken per chunk, voor de heatmap.
+     *
+     * @param player alleen deze speler, of {@code null} voor iedereen
+     */
+    CompletableFuture<List<ChunkHeat>> getBlockBreakHeatmap(UUID player);
 }

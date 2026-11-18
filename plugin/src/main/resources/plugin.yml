@@ -2,6 +2,8 @@ name: SlopSlurperPlugin
 version: '${project.version}'
 main: com.slopslurper.plugin.SlopSlurperPlugin
 api-version: '1.21.11'
+# Optioneel: als BlueMap er is, tekenen we de heatmap op de 3D-kaart
+softdepend: [BlueMap]
 description: ${project.description}
 
 commands:
