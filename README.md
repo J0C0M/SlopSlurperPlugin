@@ -56,6 +56,31 @@ Als PowerShell het script blokkeert, start je het met `powershell -ExecutionPoli
 - Open `plugin/` in IntelliJ als Maven-project.
 - Na een wijziging stop je de server en start je hem opnieuw met het script. Herladen met `/reload` raden we af.
 
+## Data en dashboard
+
+De plugin slaat op welke blokken spelers breken in `run/plugins/SlopSlurperPlugin/data.db` (SQLite).
+
+- **In-game:** `/blockstats` toont je eigen top 10, `/blockstats <speler>` die van een ander (alleen voor op).
+- **Dashboard:** zodra de server draait, open je **http://localhost:8080/**. Daar zie je een overzicht van alle spelers en per speler de top-blokken, gereedschap, werelden en activiteit per dag en per uur. De pagina ververst elke 10 seconden.
+
+Het dashboard is standaard alleen bereikbaar vanaf je eigen pc. De poort en het adres stel je in via `run/plugins/SlopSlurperPlugin/config.yml`.
+
+### API
+
+Het dashboard haalt alles uit een JSON-API. Wil je later een andere frontend of een centrale webapp bouwen, dan is dit het contract:
+
+| Endpoint | Inhoud |
+|---|---|
+| `GET /api/overview` | Totalen, top-blokken en meest actieve spelers |
+| `GET /api/players` | Alle spelers met totaal en laatst actief |
+| `GET /api/players/{uuid}?days=14` | Details van één speler, met activiteit per uur over de laatste N dagen |
+
+### Opbouw
+
+- `storage/DataStore`: de interface voor alle opslag. `SqliteDataStore` is nu de enige implementatie. Een centrale opslag (MySQL of een API) wordt later een tweede implementatie, zonder dat listeners of het dashboard veranderen.
+- `web/WebServer`: de ingebouwde webserver (JDK `HttpServer`, geen extra dependencies).
+- `src/main/resources/web/`: de dashboard-frontend in pure HTML, CSS en JS, zonder externe libraries of CDN.
+
 ## Afspraken
 
 - Commit alleen in `plugin/` (en scripts of docs als dat nodig is).

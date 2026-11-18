@@ -38,9 +38,21 @@
         <!-- Vaste naam, zodat de startscripts de jar altijd vinden -->
         <finalName>SlopSlurperPlugin</finalName>
         <resources>
+            <!-- Alleen plugin.yml filteren (voor ${project.version}); de rest, zoals de
+                 JavaScript van het dashboard, moet ongewijzigd blijven -->
             <resource>
                 <directory>src/main/resources</directory>
                 <filtering>true</filtering>
+                <includes>
+                    <include>plugin.yml</include>
+                </includes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes>
+                    <exclude>plugin.yml</exclude>
+                </excludes>
             </resource>
         </resources>
         <plugins>

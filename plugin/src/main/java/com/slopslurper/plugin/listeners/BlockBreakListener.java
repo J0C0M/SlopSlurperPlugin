@@ -1,7 +1,7 @@
 package com.slopslurper.plugin.listeners;
 
 import com.slopslurper.plugin.storage.BlockBreakRecord;
-import com.slopslurper.plugin.storage.Database;
+import com.slopslurper.plugin.storage.DataStore;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
@@ -18,9 +18,9 @@ import org.bukkit.event.block.BlockBreakEvent;
  */
 public final class BlockBreakListener implements Listener {
 
-    private final Database database;
+    private final DataStore database;
 
-    public BlockBreakListener(Database database) {
+    public BlockBreakListener(DataStore database) {
         this.database = database;
     }
 

@@ -1,0 +1,9 @@
+# SlopSlurperPlugin instellingen
+
+dashboard:
+  # Zet op false om de webserver uit te schakelen.
+  enabled: true
+  # 127.0.0.1 = alleen bereikbaar vanaf deze computer.
+  # 0.0.0.0   = bereikbaar voor iedereen op je netwerk (let op: spelersdata wordt dan zichtbaar).
+  host: 127.0.0.1
+  port: 8080

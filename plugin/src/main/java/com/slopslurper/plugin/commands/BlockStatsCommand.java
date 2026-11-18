@@ -1,7 +1,7 @@
 package com.slopslurper.plugin.commands;
 
 import com.slopslurper.plugin.storage.BlockStats;
-import com.slopslurper.plugin.storage.Database;
+import com.slopslurper.plugin.storage.DataStore;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -23,9 +23,9 @@ public final class BlockStatsCommand implements TabExecutor {
     private static final int TOP_SIZE = 10;
 
     private final JavaPlugin plugin;
-    private final Database database;
+    private final DataStore database;
 
-    public BlockStatsCommand(JavaPlugin plugin, Database database) {
+    public BlockStatsCommand(JavaPlugin plugin, DataStore database) {
         this.plugin = plugin;
         this.database = database;
     }
