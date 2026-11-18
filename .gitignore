@@ -1,0 +1,23 @@
+# Lokale server. Elke dev speelt hier; dit komt nooit in git.
+/run/
+
+# Plugin build-output
+/plugin/target/
+
+# Runtime-bestanden die Paper zelf opnieuw maakt, mocht iemand de template direct starten
+/server-template/libraries/
+/server-template/cache/
+/server-template/versions/
+/server-template/logs/
+/server-template/crash-reports/
+/server-template/usercache.json
+session.lock
+/server-template/plugins/*
+!/server-template/plugins/.gitkeep
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db

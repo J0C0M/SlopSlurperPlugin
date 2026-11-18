@@ -1,0 +1,5 @@
+name: SlopSlurperPlugin
+version: '${project.version}'
+main: com.slopslurper.plugin.SlopSlurperPlugin
+api-version: '1.21.11'
+description: ${project.description}
