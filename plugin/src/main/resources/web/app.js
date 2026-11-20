@@ -107,16 +107,61 @@
         return h("div", { class: "empty" }, h("strong", {}, title), text);
     }
 
-    /** Horizontale balkenlijst, bv. top-blokken. */
-    function barList(entries, labelFn = pretty) {
-        if (!entries.length) return h("p", { class: "muted" }, "Nog geen data.");
+    /**
+     * Horizontale balkenlijst, bv. top-blokken. valueFn bepaalt hoe het getal eruitziet
+     * (standaard een aantal; geef `duration` mee voor tijden in ms).
+     */
+    function barList(entries, labelFn = pretty, valueFn = v => nf.format(v), emptyText = "Nog geen data.") {
+        entries = (entries || []).filter(e => e.amount > 0);
+        if (!entries.length) return h("p", { class: "muted" }, emptyText);
         const max = Math.max(...entries.map(e => e.amount));
         return h("div", { class: "bars" }, entries.map(e =>
-            h("div", { class: "bar-row", title: `${labelFn(e.key)}: ${nf.format(e.amount)}` },
+            h("div", { class: "bar-row", title: `${labelFn(e.key)}: ${valueFn(e.amount)}` },
                 h("span", { class: "bar-label" }, labelFn(e.key)),
                 h("span", { class: "bar-track" },
                     h("span", { class: "bar-fill", style: `width:${(e.amount / max) * 100}%` })),
-                h("span", { class: "bar-value" }, nf.format(e.amount)))));
+                h("span", { class: "bar-value" }, valueFn(e.amount)))));
+    }
+
+    const asIs = key => key;
+
+    /** 0.25 -> "25%" */
+    function percent(part, total) {
+        return total ? `${Math.round((part / total) * 100)}%` : "–";
+    }
+
+    /** Subtype van een death-event: dader (ZOMBIE, PLAYER) of schadetype (FALL, LAVA). */
+    function deathCause(key) {
+        return {
+            PLAYER: "Andere speler",
+            FALL: "Vallen",
+            LAVA: "Lava",
+            DROWN: "Verdronken",
+            IN_FIRE: "Vuur",
+            ON_FIRE: "Verbrand",
+            CAMPFIRE: "Kampvuur",
+            HOT_FLOOR: "Magmablok",
+            STARVE: "Verhongerd",
+            OUT_OF_WORLD: "Uit de wereld gevallen",
+            IN_WALL: "Gestikt in een blok",
+            CRAMMING: "Platgedrukt",
+            CACTUS: "Cactus",
+            SWEET_BERRY_BUSH: "Bessenstruik",
+            EXPLOSION: "Explosie",
+            BAD_RESPAWN_POINT: "Ontploft bed of respawn anchor",
+            LIGHTNING_BOLT: "Bliksem",
+            MAGIC: "Magie",
+            WITHER: "Wither-effect",
+            FREEZE: "Bevroren",
+            FLY_INTO_WALL: "Tegen een muur gevlogen",
+            FALLING_BLOCK: "Vallend blok",
+            FALLING_ANVIL: "Vallend aambeeld",
+            FALLING_STALACTITE: "Vallende stalactiet",
+            STALAGMITE: "Stalagmiet",
+            DRY_OUT: "Uitgedroogd",
+            GENERIC_KILL: "/kill",
+            GENERIC: "Onbekend",
+        }[key] ?? pretty(key);
     }
 
     /** Kolomgrafiek. points: [{label, value, title}]. Toont elk n-de label. */
@@ -178,17 +223,25 @@
         }
 
         const top = overview.topBlocks[0];
+        const topCause = overview.topDeathCauses[0];
         const table = h("table", {},
             h("thead", {}, h("tr", {},
                 h("th", {}, "Speler"),
                 h("th", { class: "num" }, "Speeltijd"),
-                h("th", { class: "num" }, "Blokken gebroken"),
+                h("th", { class: "num" }, "Gebroken"),
+                h("th", { class: "num" }, "Geplaatst"),
+                h("th", { class: "num" }, "Kills"),
+                h("th", { class: "num" }, "Doden"),
                 h("th", { class: "num" }, "Laatst actief"))),
             h("tbody", {}, players.map(p =>
                 h("tr", { onclick: () => { location.hash = `#/speler/${p.uuid}`; } },
                     h("td", {}, h("a", { href: `#/speler/${p.uuid}`, class: "player-cell" }, avatar(p.name), p.name)),
                     h("td", { class: "num", title: afkShare(p.afkMs, p.playtimeMs) ?? "" }, duration(p.playtimeMs)),
                     h("td", { class: "num" }, nf.format(p.totalBreaks)),
+                    h("td", { class: "num" }, nf.format(p.totalPlaced)),
+                    h("td", { class: "num", title: `${nf.format(p.mobKills)} mobs, ${nf.format(p.pvpKills)} spelers` },
+                        nf.format(p.mobKills + p.pvpKills)),
+                    h("td", { class: "num" }, nf.format(p.deaths)),
                     h("td", { class: "num" }, timeAgo(p.lastActive))))));
 
         return [
@@ -196,12 +249,18 @@
             h("p", { class: "subtitle" }, "Wat spelers op deze server doen."),
             h("div", { class: "kpis" },
                 kpi("Speeltijd (totaal)", duration(overview.playtimeMs), afkShare(overview.afkMs, overview.playtimeMs)),
-                kpi("Blokken gebroken", nf.format(overview.totalBreaks)),
+                kpi("Blokken gebroken", nf.format(overview.totalBreaks), `${nf.format(overview.totalPlaced)} geplaatst`),
+                kpi("Mobs gedood", nf.format(overview.mobKills),
+                    overview.pvpKills ? `en ${nf.format(overview.pvpKills)} spelers` : null),
+                kpi("Doodgegaan", nf.format(overview.deaths), topCause ? `meestal: ${deathCause(topCause.key)}` : null),
                 kpi("Spelers", nf.format(overview.playerCount)),
                 kpi("Meest gebroken blok", top ? pretty(top.key) : "–")),
             h("div", { class: "grid" },
+                card("Spelers", h("div", { class: "table-wrap" }, table), true),
                 card("Meest gebroken blokken", barList(overview.topBlocks)),
-                card("Spelers", h("div", { class: "table-wrap" }, table))),
+                card("Meest geplaatste blokken", barList(overview.topPlaced)),
+                card("Meest gedode mobs", barList(overview.topMobs)),
+                card("Doodsoorzaken", barList(overview.topDeathCauses, deathCause))),
         ];
     }
 
@@ -233,6 +292,9 @@
         const p = detail.player;
         const favBlock = detail.topBlocks[0];
         const favTool = detail.tools[0];
+        const topCause = detail.deathCauses[0];
+        const places = detail.places;
+        const hasPlaces = places && places.sampledMs > 0;
 
         return [
             back,
@@ -243,7 +305,9 @@
                 kpi("Speeltijd", duration(p.playtimeMs), afkShare(p.afkMs, p.playtimeMs)),
                 kpi("Sessies", nf.format(p.sessions),
                     p.sessions ? `gem. ${duration(p.playtimeMs / p.sessions)}` : null),
-                kpi("Blokken gebroken", nf.format(p.totalBreaks)),
+                kpi("Blokken gebroken", nf.format(p.totalBreaks), `${nf.format(p.totalPlaced)} geplaatst`),
+                kpi("Mobs gedood", nf.format(p.mobKills), p.pvpKills ? `en ${nf.format(p.pvpKills)} spelers` : null),
+                kpi("Doodgegaan", nf.format(p.deaths), topCause ? `meestal: ${deathCause(topCause.key)}` : null),
                 kpi("Favoriete blok", favBlock ? pretty(favBlock.key) : "–"),
                 kpi("Meest gebruikt", favTool ? pretty(favTool.key) : "–")),
             h("div", { class: "grid" },
@@ -251,8 +315,38 @@
                 card(`Blokken per dag (laatste ${DAYS} dagen)`, columnChart(perDay(detail.activity, DAYS), 2), true),
                 card("Wanneer speelt deze speler?", columnChart(perHourOfDay(detail.activity), 3), true),
                 card("Meest gebroken blokken", barList(detail.topBlocks)),
+                card("Meest geplaatste blokken", barList(detail.topPlaced)),
                 card("Gereedschap", barList(detail.tools)),
-                card("Werelden", barList(detail.worlds, prettyWorld))),
+                hasPlaces
+                    ? card("Tijd per wereld", barList(places.worlds, prettyWorld, duration))
+                    : card("Werelden (gebroken blokken)", barList(detail.worlds, prettyWorld)),
+                card("Gedode mobs", barList(detail.mobKills)),
+                card("Doodsoorzaken", barList(detail.deathCauses, deathCause)),
+                detail.pvpVictims.length ? card("Gedode spelers", barList(detail.pvpVictims, asIs)) : null,
+                ...placeCards(places)),
+        ];
+    }
+
+    /** Kaarten uit de positie-samples: biomen, ondergronds, voertuigen en met wie. */
+    function placeCards(places) {
+        if (!places || !places.sampledMs) {
+            return [card("Waar speelt deze speler?", h("p", { class: "muted" },
+                "Nog geen positie-data. Zolang de speler online is, wordt elke paar seconden vastgelegd waar hij is."), true)];
+        }
+        const depth = [
+            { key: "Ondergronds of binnen", amount: places.undergroundMs },
+            { key: "Bovengronds", amount: places.surfaceMs },
+        ];
+        return [
+            card("Biomen", barList(places.biomes, pretty, duration)),
+            card("Ondergronds of bovengronds", barList(depth, asIs, duration,
+                "Alleen bekend in de overworld.")),
+            card("Onderweg", barList(places.vehicles, pretty, duration,
+                "Nog niet in een boot, minecart, op een paard of met elytra geweest.")),
+            card("Speelt het meest met", h("div", {},
+                h("p", { class: "muted" },
+                    `${percent(places.withOthersMs, places.sampledMs)} van de tijd met andere spelers in de buurt.`),
+                barList(places.companions, asIs, duration, "Nog niet samen met anderen gespeeld."))),
         ];
     }
 
