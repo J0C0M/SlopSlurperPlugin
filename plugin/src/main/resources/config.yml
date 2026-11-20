@@ -26,3 +26,21 @@ trackers:
   # Elk blok dat een speler breekt (type, plek, gereedschap).
   block-break:
     enabled: true
+  # Elk blok dat een speler plaatst (type, plek).
+  block-place:
+    enabled: true
+  # Mobs en spelers die door een speler gedood worden (type, wapen, plek, afstand).
+  kills:
+    enabled: true
+  # Doodgaan: oorzaak, plek, verloren items en hoe lang de speler het volhield.
+  deaths:
+    enabled: true
+  # Elke paar seconden per speler: wereld, positie, biome, ondergronds, voertuig
+  # en wie er in de buurt is. Basis voor "waar besteden spelers hun tijd".
+  positions:
+    enabled: true
+    # Hoe vaak een positie wordt vastgelegd. Lager = nauwkeuriger, maar meer rijen
+    # (bij 10 s: 360 per speler per uur).
+    sample-seconds: 10
+    # Spelers binnen zoveel blokken tellen als "in de buurt" (samen spelen). 0 = niet bijhouden.
+    nearby-radius: 32

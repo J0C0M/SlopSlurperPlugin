@@ -95,6 +95,31 @@ final class SqliteMigrations {
                             end_reason   TEXT
                         )""");
                 st.execute("CREATE INDEX idx_sessions_player ON sessions(player_uuid, started_at)");
+            }),
+
+            new Migration(4, "position_samples-tabel (waar spelers zijn, biome, wie in de buurt)", st -> {
+                // Elke paar seconden één rij per online speler. interval_ms = hoeveel speeltijd
+                // de rij vertegenwoordigt, zodat SUM(interval_ms) de tijd geeft.
+                // underground: 1/0, NULL in werelden zonder lucht. nearby: JSON-array met UUIDs.
+                st.execute("""
+                        CREATE TABLE position_samples (
+                            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                            player_uuid  TEXT    NOT NULL,
+                            world        TEXT    NOT NULL,
+                            x            INTEGER NOT NULL,
+                            y            INTEGER NOT NULL,
+                            z            INTEGER NOT NULL,
+                            biome        TEXT,
+                            underground  INTEGER,
+                            vehicle      TEXT,
+                            game_mode    TEXT,
+                            nearby_count INTEGER NOT NULL DEFAULT 0,
+                            nearby       TEXT,
+                            interval_ms  INTEGER NOT NULL,
+                            created_at   INTEGER NOT NULL
+                        )""");
+                st.execute("CREATE INDEX idx_positions_player_time ON position_samples(player_uuid, created_at)");
+                st.execute("CREATE INDEX idx_positions_world ON position_samples(world, x, z)");
             })
     );
 

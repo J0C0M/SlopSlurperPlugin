@@ -9,6 +9,29 @@ public final class EventTypes {
     /** subtype = bloktype, item = gereedschap. */
     public static final String BLOCK_BREAK = "block_break";
 
+    /** subtype = bloktype, item = item in de hand (meestal hetzelfde blok). */
+    public static final String BLOCK_PLACE = "block_place";
+
+    /**
+     * Speler doodt een mob. subtype = mobtype, item = wapen, plek = waar de mob stierf,
+     * meta.distance = afstand tot de mob (handig voor pijl en boog).
+     */
+    public static final String MOB_KILL = "mob_kill";
+
+    /**
+     * Speler doodt een andere speler. subtype = naam van het slachtoffer, item = wapen,
+     * meta.victim = UUID van het slachtoffer.
+     */
+    public static final String PVP_KILL = "pvp_kill";
+
+    /**
+     * Speler gaat dood. subtype = oorzaak: het type van de dader als die er is
+     * ({@code ZOMBIE}, {@code PLAYER}, ...), anders het schadetype ({@code FALL}, {@code LAVA}, ...).
+     * meta: damage_type, killer (naam bij PvP), items_lost, xp_lost, keep_inventory,
+     * alive_ms (speeltijd sinds de vorige dood), session_ms (tijd sinds inloggen).
+     */
+    public static final String DEATH = "death";
+
     /** Speler komt online. meta.session = sessie-id. */
     public static final String SESSION_START = "session_start";
 

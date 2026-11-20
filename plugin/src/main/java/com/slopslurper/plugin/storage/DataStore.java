@@ -35,6 +35,9 @@ public interface DataStore {
      */
     void saveSession(SessionRecord session);
 
+    /** Zet een positie-sample in de wachtrij. Net als events goedkoop vanaf de main thread. */
+    void recordPosition(PositionSample sample);
+
     /** Schrijft de wachtrij weg op de achtergrond. */
     void flushAsync();
 

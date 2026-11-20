@@ -22,7 +22,11 @@ public final class TrackerManager {
     /** Alle trackers die de plugin kent. Nieuwe tracker? Hier toevoegen. */
     static final List<Supplier<Tracker>> TRACKERS = List.of(
             SessionTracker::new,
-            BlockBreakTracker::new
+            BlockBreakTracker::new,
+            BlockPlaceTracker::new,
+            KillTracker::new,
+            DeathTracker::new,
+            PositionTracker::new
     );
 
     private final JavaPlugin plugin;

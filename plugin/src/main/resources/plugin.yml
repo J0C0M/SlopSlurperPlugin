@@ -8,7 +8,7 @@ description: ${project.description}
 
 commands:
   blockstats:
-    description: Laat zien welke blokken een speler het meest breekt.
+    description: Laat zien hoeveel blokken een speler breekt en plaatst, en welke het meest.
     usage: /blockstats [speler]
     permission: slopslurper.blockstats
 
