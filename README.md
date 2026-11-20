@@ -66,14 +66,23 @@ De plugin slaat spelersdata op in `run/plugins/SlopSlurperPlugin/data.db` (SQLit
 | Tracker | Wat | Instellingen |
 |---|---|---|
 | `sessions` | Sessies van join tot quit: speeltijd, AFK-tijd en de reden van uitloggen. Events `session_start`, `session_end`, `afk_start` en `afk_end`. | `afk-timeout-seconds` (180), `checkpoint-seconds` (60) |
-| `block-break` | Elk gebroken blok: type, plek en gereedschap. | – |
+| `block-break` | Elk gebroken blok: type, plek en gereedschap. Event `block_break`. | – |
+| `block-place` | Elk geplaatst blok: type en plek. Event `block_place`. | – |
+| `kills` | Mobs en spelers die een speler doodt: type, wapen, plek en afstand. Events `mob_kill` en `pvp_kill`. | – |
+| `deaths` | Doodgaan: oorzaak (dader of schadetype, bijv. `ZOMBIE` of `FALL`), plek, verloren items, level en hoe lang de speler het volhield. Event `death`. | – |
+| `positions` | Elke paar seconden per speler: wereld, positie, biome, ondergronds of niet, voertuig (boot, paard, minecart, elytra) en welke spelers in de buurt zijn. Eigen tabel `position_samples`. | `sample-seconds` (10), `nearby-radius` (32) |
 
 **Over AFK:** iemand is AFK na `afk-timeout-seconds` zonder echte input. Als input telt: rondkijken, zelf lopen, springen, klikken, interacties, inventory, chat, commando's, sneaken, sprinten en van hotbar-slot wisselen. Meegevoerd worden door water, een minecart of een boot telt niet, dus AFK-pools werken niet om speeltijd te faken. De AFK-tijd telt terug vanaf de laatste input: wie 3 minuten stilstaat, heeft 3 minuten AFK.
 
 **Bij een crash:** lopende sessies worden elke `checkpoint-seconds` tussentijds opgeslagen. Na een crash sluit de plugin ze bij de volgende start af op dat laatste moment, met als reden `SERVER_CRASH`.
 
-- **In-game:** `/blockstats` toont je eigen top 10, `/blockstats <speler>` die van een ander (alleen voor op).
-- **Dashboard:** zodra de server draait, open je **http://localhost:8080/**. Daar zie je een overzicht van alle spelers met hun speeltijd. Per speler zie je speeltijd en AFK, de laatste sessies, de top-blokken, gereedschap, werelden en activiteit per dag en per uur. De pagina ververst elke 10 seconden.
+**Over posities:** `positions` legt elke `sample-seconds` vast waar iedere online speler is. Elke rij telt als `sample-seconds` speeltijd, dus de som geeft "tijd in biome X" of "tijd met speler Y". "Ondergronds" betekent: geen daglicht en een blok boven je hoofd. Een huis zonder ramen telt dus ook mee. In de Nether en de End is dit leeg. Bij 10 seconden zijn dat 360 rijen per speler per uur.
+
+- **In-game:** `/blockstats` toont hoeveel blokken je gebroken en geplaatst hebt, en je top 10. `/blockstats <speler>` doet dat voor een ander (alleen voor op).
+- **Dashboard:** zodra de server draait, open je **http://localhost:8080/**.
+  - **Overzicht:** alle spelers met speeltijd, gebroken en geplaatste blokken, kills en doden, plus de meest gebroken en geplaatste blokken, de meest gedode mobs en de doodsoorzaken.
+  - **Per speler:** speeltijd en AFK, de laatste sessies, activiteit per dag en per uur, blokken, gereedschap, gedode mobs en spelers, doodsoorzaken, en uit de posities: tijd per wereld en biome, ondergronds of bovengronds, tijd in voertuigen en met wie de speler het meest speelt.
+  - De pagina ververst elke 10 seconden.
 
 Het dashboard is standaard alleen bereikbaar vanaf je eigen pc. De poort en het adres stel je in via `run/plugins/SlopSlurperPlugin/config.yml`.
 
@@ -96,9 +105,9 @@ Het dashboard haalt alles uit een JSON-API. Wil je later een andere frontend of 
 
 | Endpoint | Inhoud |
 |---|---|
-| `GET /api/overview` | Totalen, top-blokken en meest actieve spelers |
-| `GET /api/players` | Alle spelers met totaal en laatst actief |
-| `GET /api/players/{uuid}?days=14` | Details van één speler, met activiteit per uur over de laatste N dagen |
+| `GET /api/overview` | Totalen (blokken, kills, doden, speeltijd), top-blokken, top-mobs, doodsoorzaken en meest actieve spelers |
+| `GET /api/players` | Alle spelers met hun totalen, speeltijd en laatst actief |
+| `GET /api/players/{uuid}?days=14` | Details van één speler, met activiteit per uur over de laatste N dagen en `places` (tijd per wereld, biome, voertuig en met wie, in ms) |
 | `GET /api/heatmap[?player={uuid}]` | Gebroken blokken per chunk (wereld, chunk x/z, aantal, min/max y) |
 | `GET /api/config` | Instellingen voor de frontend, bijvoorbeeld of de 3D-kaart beschikbaar is |
 
@@ -106,23 +115,23 @@ Het dashboard haalt alles uit een JSON-API. Wil je later een andere frontend of 
 
 - `trackers/`: elke tracker verzamelt één soort data. `TrackerManager` start ze, en in `config.yml` zet je ze aan of uit (zie hieronder).
 - `storage/DataStore`: de interface voor alle opslag. `SqliteDataStore` is nu de enige implementatie. Een centrale opslag (MySQL of een API) wordt later een tweede implementatie, zonder dat trackers of het dashboard veranderen.
-- `storage/GameEvent`: het ene datamodel voor alles wat er gebeurt. Alles komt in één tabel, `events`, met kolommen `type`, `subtype`, speler, wereld, x/y/z, `item`, `game_mode`, `value`, `meta` (JSON) en `created_at`. De mogelijke `type`-waarden staan in `storage/EventTypes`.
+- `storage/GameEvent`: het ene datamodel voor alles wat er gebeurt. Alles komt in één tabel, `events`, met kolommen `type`, `subtype`, speler, wereld, x/y/z, `item`, `game_mode`, `value`, `meta` (JSON) en `created_at`. De mogelijke `type`-waarden en hun meta-velden staan in `storage/EventTypes`.
+- Twee uitzonderingen met een eigen tabel: `sessions` (één rij per sessie, wordt bijgewerkt) en `position_samples` (veel rijen met steeds dezelfde vaste velden, zie `storage/PositionSample`).
 - `storage/SqliteMigrations`: schemawijzigingen. Bij het opstarten werkt elke `data.db` zichzelf bij. Vóór een migratie op bestaande data maakt de plugin automatisch een backup (`data.db.backup-v<versie>`).
 - `web/WebServer`: de ingebouwde webserver (JDK `HttpServer`, geen extra dependencies).
 - `src/main/resources/web/`: de dashboard-frontend in pure HTML, CSS en JS, zonder externe libraries of CDN.
 
 ### Een tracker toevoegen
 
-1. Voeg een constante toe aan `storage/EventTypes`, bijvoorbeeld `MOB_KILL = "mob_kill"`.
-2. Maak in `trackers/` een klasse die `EventTracker` uitbreidt, met een `id()` (bijvoorbeeld `mob-kill`) en `@EventHandler`-methodes:
+1. Voeg een constante toe aan `storage/EventTypes`, bijvoorbeeld `FISH = "fish"`.
+2. Maak in `trackers/` een klasse die `EventTracker` uitbreidt, met een `id()` (bijvoorbeeld `fishing`) en `@EventHandler`-methodes. `BlockPlaceTracker` en `KillTracker` zijn korte voorbeelden.
    ```java
    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
-   public void onKill(EntityDeathEvent event) {
-       Player killer = event.getEntity().getKiller();
-       if (killer == null) return;
-       record(GameEvent.of(EventTypes.MOB_KILL, killer)
-               .subtype(event.getEntityType())
-               .at(event.getEntity().getLocation())
+   public void onFish(PlayerFishEvent event) {
+       if (event.getState() != PlayerFishEvent.State.CAUGHT_FISH) return;
+       if (!(event.getCaught() instanceof Item caught)) return;
+       record(GameEvent.of(EventTypes.FISH, event.getPlayer())
+               .subtype(caught.getItemStack().getType())
                .build());
    }
    ```
