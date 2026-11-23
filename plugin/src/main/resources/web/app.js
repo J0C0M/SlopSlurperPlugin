@@ -322,6 +322,7 @@
                     : card("Werelden (gebroken blokken)", barList(detail.worlds, prettyWorld)),
                 card("Gedode mobs", barList(detail.mobKills)),
                 card("Doodsoorzaken", barList(detail.deathCauses, deathCause)),
+                card("Gevangen bij het vissen", barList(detail.catches)),
                 detail.pvpVictims.length ? card("Gedode spelers", barList(detail.pvpVictims, asIs)) : null,
                 ...placeCards(places)),
         ];

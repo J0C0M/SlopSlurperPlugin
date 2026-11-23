@@ -32,6 +32,9 @@ public final class EventTypes {
      */
     public static final String DEATH = "death";
 
+    /** Vangst bij het vissen. subtype = gevangen item of entity, plek = dobber, meta.xp = XP. */
+    public static final String FISH = "fish";
+
     /** Speler komt online. meta.session = sessie-id. */
     public static final String SESSION_START = "session_start";
 

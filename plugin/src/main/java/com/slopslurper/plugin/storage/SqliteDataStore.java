@@ -317,6 +317,7 @@ public final class SqliteDataStore implements DataStore {
                     topSubtypes(EventTypes.MOB_KILL, id, limit),
                     topSubtypes(EventTypes.PVP_KILL, id, limit),
                     topSubtypes(EventTypes.DEATH, id, limit),
+                    topSubtypes(EventTypes.FISH, id, limit),
                     activity, recent, places(id, limit)));
         });
     }

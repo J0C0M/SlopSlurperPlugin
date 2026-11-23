@@ -18,6 +18,7 @@ public record PlayerDetail(
         List<CountEntry> mobKills,
         List<CountEntry> pvpVictims,
         List<CountEntry> deathCauses,
+        List<CountEntry> catches,
         List<ActivityBucket> activity,
         List<SessionInfo> sessions,
         Places places

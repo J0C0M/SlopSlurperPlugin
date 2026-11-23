@@ -35,6 +35,9 @@ trackers:
   # Doodgaan: oorzaak, plek, verloren items en hoe lang de speler het volhield.
   deaths:
     enabled: true
+  # Vangsten bij het vissen (wat, plek van de dobber, XP).
+  fishing:
+    enabled: true
   # Elke paar seconden per speler: wereld, positie, biome, ondergronds, voertuig
   # en wie er in de buurt is. Basis voor "waar besteden spelers hun tijd".
   positions:

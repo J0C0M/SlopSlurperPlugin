@@ -26,6 +26,7 @@ public final class TrackerManager {
             BlockPlaceTracker::new,
             KillTracker::new,
             DeathTracker::new,
+            FishTracker::new,
             PositionTracker::new
     );
 
