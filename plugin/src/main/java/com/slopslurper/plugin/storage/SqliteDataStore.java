@@ -1,5 +1,7 @@
 package com.slopslurper.plugin.storage;
 
+import com.google.gson.Gson;
+import com.slopslurper.plugin.storage.stats.ChunkHeat;
 import com.slopslurper.plugin.storage.stats.CountEntry;
 import com.slopslurper.plugin.storage.stats.Overview;
 import com.slopslurper.plugin.storage.stats.PlayerDetail;
@@ -12,6 +14,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -31,18 +34,27 @@ import java.util.logging.Logger;
  * Alle databasewerk draait op één eigen achtergrondthread, zodat de main thread
  * (en dus de TPS van de server) nooit op disk-I/O hoeft te wachten. Events worden
  * eerst in een wachtrij gezet en periodiek in één transactie weggeschreven.
+ *
+ * Bijna alles staat in één generieke {@code events}-tabel (zie {@link SqliteMigrations});
+ * {@link EventTypes} bevat de mogelijke waarden van {@code type}. Sessies en positie-samples
+ * hebben een eigen tabel.
  */
 public final class SqliteDataStore implements DataStore {
 
+    /** Basisfilter voor alle blokbreuk-queries. */
+    private static final String BREAKS = "FROM events WHERE type = '" + EventTypes.BLOCK_BREAK + "'";
+
     private final File file;
     private final Logger logger;
+    private final Gson gson = new Gson();
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "SlopSlurper-DB");
         t.setDaemon(true);
         return t;
     });
-    private final Queue<BlockBreakRecord> pendingBreaks = new ConcurrentLinkedQueue<>();
-    private final Queue<FishingRecord> pendingFishing = new ConcurrentLinkedQueue<>();
+    private final Queue<GameEvent> pending = new ConcurrentLinkedQueue<>();
+    private final Queue<SessionRecord> pendingSessions = new ConcurrentLinkedQueue<>();
+    private final Queue<PositionSample> pendingPositions = new ConcurrentLinkedQueue<>();
 
     private Connection connection;
 
@@ -51,144 +63,157 @@ public final class SqliteDataStore implements DataStore {
         this.logger = logger;
     }
 
-    /** Opent de database en maakt de tabellen aan. Blokkeert tot het klaar is. */
+    /** Opent de database en voert openstaande migraties uit. Blokkeert tot het klaar is. */
+    @Override
     public void open() throws Exception {
         file.getParentFile().mkdirs();
         executor.submit(() -> {
             connection = DriverManager.getConnection("jdbc:sqlite:" + file.getAbsolutePath());
             try (Statement st = connection.createStatement()) {
                 st.execute("PRAGMA journal_mode=WAL");
-                st.execute("""
-                        CREATE TABLE IF NOT EXISTS block_breaks (
-                            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                            player_uuid TEXT    NOT NULL,
-                            player_name TEXT    NOT NULL,
-                            block_type  TEXT    NOT NULL,
-                            world       TEXT    NOT NULL,
-                            x           INTEGER NOT NULL,
-                            y           INTEGER NOT NULL,
-                            z           INTEGER NOT NULL,
-                            tool        TEXT    NOT NULL,
-                            game_mode   TEXT    NOT NULL,
-                            broken_at   INTEGER NOT NULL
-                        )""");
-                st.execute("CREATE INDEX IF NOT EXISTS idx_block_breaks_player ON block_breaks(player_uuid, block_type)");
-                st.execute("CREATE INDEX IF NOT EXISTS idx_block_breaks_time ON block_breaks(broken_at)");
-                st.execute("""
-                        CREATE TABLE IF NOT EXISTS fishing (
-                            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                            player_uuid TEXT    NOT NULL,
-                            player_name TEXT    NOT NULL,
-                            state       TEXT    NOT NULL,
-                            caught      TEXT    NOT NULL,
-                            world       TEXT    NOT NULL,
-                            x           INTEGER NOT NULL,
-                            y           INTEGER NOT NULL,
-                            z           INTEGER NOT NULL,
-                            xp          INTEGER NOT NULL,
-                            fished_at   INTEGER NOT NULL
-                        )""");
-                st.execute("CREATE INDEX IF NOT EXISTS idx_fishing_player ON fishing(player_uuid, caught)");
             }
+            SqliteMigrations.migrate(connection, file, logger);
+            closeDanglingSessions();
             return null;
         }).get();
     }
 
-    /** Zet een blokbreuk in de wachtrij. Veilig om vanaf de main thread aan te roepen. */
-    public void queueBlockBreak(BlockBreakRecord record) {
-        pendingBreaks.add(record);
+    /**
+     * Sessies zonder einde komen van een crash of een harde stop (de quit is nooit verwerkt).
+     * Die sluiten we af op het laatste tussentijdse moment dat we ze zagen.
+     */
+    private void closeDanglingSessions() throws SQLException {
+        try (Statement st = connection.createStatement()) {
+            int n = st.executeUpdate("UPDATE sessions SET ended_at = last_seen_at, end_reason = 'SERVER_CRASH' "
+                    + "WHERE ended_at IS NULL");
+            if (n > 0) {
+                logger.info(n + " sessie(s) van een vorige crash afgesloten op hun laatst bekende tijd.");
+            }
+        }
     }
 
     @Override
-    public void queueFishing(FishingRecord record) {
-        pendingFishing.add(record);
+    public void recordEvent(GameEvent event) {
+        pending.add(event);
     }
 
-    /** Schrijft de wachtrij weg op de achtergrondthread. */
+    @Override
+    public void saveSession(SessionRecord session) {
+        pendingSessions.add(session);
+    }
+
+    @Override
+    public void recordPosition(PositionSample sample) {
+        pendingPositions.add(sample);
+    }
+
+    @Override
     public void flushAsync() {
-        if (!pendingBreaks.isEmpty()) {
+        if (!pending.isEmpty() || !pendingSessions.isEmpty() || !pendingPositions.isEmpty()) {
             executor.execute(this::flushNow);
         }
-        if (!pendingFishing.isEmpty()) {
-            executor.execute(this::flushFishingNow);
-        }
     }
 
-    private void flushFishingNow() {
-        List<FishingRecord> batch = new ArrayList<>();
-        FishingRecord r;
-        while ((r = pendingFishing.poll()) != null) {
-            batch.add(r);
+    private static final String SESSION_UPSERT = """
+            INSERT INTO sessions (id, player_uuid, player_name, started_at, last_seen_at, ended_at, afk_ms, end_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                player_name  = excluded.player_name,
+                last_seen_at = excluded.last_seen_at,
+                ended_at     = excluded.ended_at,
+                afk_ms       = excluded.afk_ms,
+                end_reason   = excluded.end_reason""";
+
+    private static final String EVENT_INSERT = "INSERT INTO events (type, player_uuid, player_name, subtype, world, "
+            + "x, y, z, item, game_mode, value, meta, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    private static final String POSITION_INSERT = "INSERT INTO position_samples (player_uuid, world, x, y, z, "
+            + "biome, underground, vehicle, game_mode, nearby_count, nearby, interval_ms, created_at) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    private static <T> List<T> drain(Queue<T> queue) {
+        List<T> result = new ArrayList<>();
+        T item;
+        while ((item = queue.poll()) != null) {
+            result.add(item);
         }
-        if (batch.isEmpty() || connection == null) {
-            return;
-        }
-        String sql = "INSERT INTO fishing (player_uuid, player_name, state, caught, world, x, y, z, xp, fished_at) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        try (PreparedStatement ps = connection.prepareStatement(sql)) {
-            connection.setAutoCommit(false);
-            for (FishingRecord f : batch) {
-                ps.setString(1, f.playerUuid().toString());
-                ps.setString(2, f.playerName());
-                ps.setString(3, f.state());
-                ps.setString(4, f.caught());
-                ps.setString(5, f.world());
-                ps.setInt(6, f.x());
-                ps.setInt(7, f.y());
-                ps.setInt(8, f.z());
-                ps.setInt(9, f.xp());
-                ps.setLong(10, f.fishedAt());
-                ps.addBatch();
-            }
-            ps.executeBatch();
-            connection.commit();
-        } catch (SQLException e) {
-            logger.log(Level.SEVERE, "Kon " + batch.size() + " vismomenten niet opslaan", e);
-            try {
-                connection.rollback();
-            } catch (SQLException ignored) {
-            }
-        } finally {
-            try {
-                connection.setAutoCommit(true);
-            } catch (SQLException ignored) {
-            }
-        }
+        return result;
     }
 
     private void flushNow() {
-        List<BlockBreakRecord> batch = new ArrayList<>();
-        BlockBreakRecord r;
-        while ((r = pendingBreaks.poll()) != null) {
-            batch.add(r);
+        if (connection == null) {
+            return;
         }
-        if (batch.isEmpty() || connection == null) {
+        List<GameEvent> batch = drain(pending);
+        List<SessionRecord> sessions = drain(pendingSessions);
+        List<PositionSample> positions = drain(pendingPositions);
+        if (batch.isEmpty() && sessions.isEmpty() && positions.isEmpty()) {
             return;
         }
 
-        String sql = "INSERT INTO block_breaks (player_uuid, player_name, block_type, world, x, y, z, tool, game_mode, broken_at) "
-                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try {
             connection.setAutoCommit(false);
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
-                for (BlockBreakRecord b : batch) {
-                    ps.setString(1, b.playerUuid().toString());
-                    ps.setString(2, b.playerName());
-                    ps.setString(3, b.blockType());
-                    ps.setString(4, b.world());
-                    ps.setInt(5, b.x());
-                    ps.setInt(6, b.y());
-                    ps.setInt(7, b.z());
-                    ps.setString(8, b.tool());
-                    ps.setString(9, b.gameMode());
-                    ps.setLong(10, b.brokenAt());
+            // Sessies in volgorde van binnenkomst, zodat de nieuwste stand als laatste wint
+            try (PreparedStatement ps = connection.prepareStatement(SESSION_UPSERT)) {
+                for (SessionRecord rec : sessions) {
+                    ps.setString(1, rec.id());
+                    ps.setString(2, rec.playerUuid().toString());
+                    ps.setString(3, rec.playerName());
+                    ps.setLong(4, rec.startedAt());
+                    ps.setLong(5, rec.lastSeenAt());
+                    if (rec.endedAt() == null) {
+                        ps.setNull(6, Types.INTEGER);
+                    } else {
+                        ps.setLong(6, rec.endedAt());
+                    }
+                    ps.setLong(7, rec.afkMs());
+                    ps.setString(8, rec.endReason());
+                    ps.executeUpdate();
+                }
+            }
+            try (PreparedStatement ps = connection.prepareStatement(EVENT_INSERT)) {
+                for (GameEvent ev : batch) {
+                    ps.setString(1, ev.type());
+                    ps.setString(2, ev.playerUuid() == null ? null : ev.playerUuid().toString());
+                    ps.setString(3, ev.playerName());
+                    ps.setString(4, ev.subtype());
+                    ps.setString(5, ev.world());
+                    setInt(ps, 6, ev.x());
+                    setInt(ps, 7, ev.y());
+                    setInt(ps, 8, ev.z());
+                    ps.setString(9, ev.item());
+                    ps.setString(10, ev.gameMode());
+                    ps.setDouble(11, ev.value());
+                    ps.setString(12, ev.meta().isEmpty() ? null : gson.toJson(ev.meta()));
+                    ps.setLong(13, ev.createdAt());
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+            try (PreparedStatement ps = connection.prepareStatement(POSITION_INSERT)) {
+                for (PositionSample p : positions) {
+                    ps.setString(1, p.playerUuid().toString());
+                    ps.setString(2, p.world());
+                    ps.setInt(3, p.x());
+                    ps.setInt(4, p.y());
+                    ps.setInt(5, p.z());
+                    ps.setString(6, p.biome());
+                    setInt(ps, 7, p.underground() == null ? null : (p.underground() ? 1 : 0));
+                    ps.setString(8, p.vehicle());
+                    ps.setString(9, p.gameMode());
+                    ps.setInt(10, p.nearby().size());
+                    ps.setString(11, p.nearby().isEmpty() ? null
+                            : gson.toJson(p.nearby().stream().map(UUID::toString).toList()));
+                    ps.setLong(12, p.intervalMs());
+                    ps.setLong(13, p.createdAt());
                     ps.addBatch();
                 }
                 ps.executeBatch();
             }
             connection.commit();
-        } catch (SQLException e) {
-            logger.log(Level.SEVERE, "Kon " + batch.size() + " blokbreuken niet opslaan", e);
+        } catch (SQLException ex) {
+            logger.log(Level.SEVERE, "Kon " + batch.size() + " events, " + sessions.size() + " sessies en "
+                    + positions.size() + " posities niet opslaan", ex);
             try {
                 connection.rollback();
             } catch (SQLException ignored) {
@@ -201,108 +226,190 @@ public final class SqliteDataStore implements DataStore {
         }
     }
 
-    /** Totaal aantal gebroken blokken plus de top N bloktypes van een speler. */
-    public CompletableFuture<BlockStats> getBlockStats(UUID player, int limit) {
-        return CompletableFuture.supplyAsync(() -> {
-            flushNow(); // zodat net gebroken blokken ook meetellen
-            try {
-                long total;
-                try (PreparedStatement ps = connection.prepareStatement(
-                        "SELECT COUNT(*) FROM block_breaks WHERE player_uuid = ?")) {
-                    ps.setString(1, player.toString());
-                    try (ResultSet rs = ps.executeQuery()) {
-                        total = rs.next() ? rs.getLong(1) : 0;
-                    }
-                }
+    private static void setInt(PreparedStatement ps, int index, Integer value) throws SQLException {
+        if (value == null) {
+            ps.setNull(index, Types.INTEGER);
+        } else {
+            ps.setInt(index, value);
+        }
+    }
 
-                List<BlockStats.Entry> top = new ArrayList<>();
-                try (PreparedStatement ps = connection.prepareStatement(
-                        "SELECT block_type, COUNT(*) AS amount FROM block_breaks WHERE player_uuid = ? "
-                                + "GROUP BY block_type ORDER BY amount DESC LIMIT ?")) {
-                    ps.setString(1, player.toString());
-                    ps.setInt(2, limit);
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next()) {
-                            top.add(new BlockStats.Entry(rs.getString(1), rs.getLong(2)));
-                        }
-                    }
-                }
-                return new BlockStats(total, top);
-            } catch (SQLException e) {
-                throw new RuntimeException(e);
-            }
-        }, executor);
+    // ---------- Queries ----------
+
+    @Override
+    public CompletableFuture<BlockStats> getBlockStats(UUID player, int limit) {
+        String id = player.toString();
+        return query(() -> {
+            long total = countOf(EventTypes.BLOCK_BREAK, id);
+            long placed = countOf(EventTypes.BLOCK_PLACE, id);
+            List<BlockStats.Entry> top = topSubtypes(EventTypes.BLOCK_BREAK, id, limit).stream()
+                    .map(c -> new BlockStats.Entry(c.key(), c.amount())).toList();
+            return new BlockStats(total, placed, top);
+        });
     }
 
     @Override
     public CompletableFuture<Overview> getOverview(int limit) {
         return query(() -> {
-            long total;
-            long players;
-            try (Statement st = connection.createStatement();
-                 ResultSet rs = st.executeQuery("SELECT COUNT(*), COUNT(DISTINCT player_uuid) FROM block_breaks")) {
-                rs.next();
-                total = rs.getLong(1);
-                players = rs.getLong(2);
-            }
-            List<CountEntry> topBlocks = counts(
-                    "SELECT block_type, COUNT(*) AS n FROM block_breaks GROUP BY block_type ORDER BY n DESC LIMIT ?",
-                    limit);
-            List<PlayerSummary> topPlayers = summaries(PLAYER_SUMMARY_SQL + " ORDER BY total DESC LIMIT ?", limit);
-            return new Overview(total, players, topBlocks, topPlayers);
+            long players = single("SELECT COUNT(DISTINCT player_uuid) FROM events WHERE player_uuid IS NOT NULL");
+            long playtime = single("SELECT COALESCE(SUM(" + SESSION_DURATION + "), 0) FROM sessions");
+            long afk = single("SELECT COALESCE(SUM(afk_ms), 0) FROM sessions");
+            List<PlayerSummary> topPlayers = summaries(playerSummarySql(false) + " ORDER BY playtime DESC, total DESC LIMIT ?", limit);
+            return new Overview(
+                    countOf(EventTypes.BLOCK_BREAK, null),
+                    countOf(EventTypes.BLOCK_PLACE, null),
+                    countOf(EventTypes.MOB_KILL, null),
+                    countOf(EventTypes.PVP_KILL, null),
+                    countOf(EventTypes.DEATH, null),
+                    players, playtime, afk,
+                    topSubtypes(EventTypes.BLOCK_BREAK, null, limit),
+                    topSubtypes(EventTypes.BLOCK_PLACE, null, limit),
+                    topSubtypes(EventTypes.MOB_KILL, null, limit),
+                    topSubtypes(EventTypes.DEATH, null, limit),
+                    topPlayers);
         });
     }
 
     @Override
     public CompletableFuture<List<PlayerSummary>> getPlayers() {
-        return query(() -> summaries(PLAYER_SUMMARY_SQL + " ORDER BY total DESC"));
+        return query(() -> summaries(playerSummarySql(false) + " ORDER BY playtime DESC, total DESC"));
     }
 
     @Override
     public CompletableFuture<Optional<PlayerDetail>> getPlayer(UUID player, int limit, long activitySince) {
         String id = player.toString();
         return query(() -> {
-            List<PlayerSummary> found = summaries(
-                    "SELECT player_uuid, player_name, COUNT(*) AS total, MAX(broken_at) FROM block_breaks "
-                            + "WHERE player_uuid = ? GROUP BY player_uuid", id);
+            List<PlayerSummary> found = summaries(playerSummarySql(true), id);
             if (found.isEmpty()) {
                 return Optional.empty();
             }
-            List<CountEntry> blocks = counts(
-                    "SELECT block_type, COUNT(*) AS n FROM block_breaks WHERE player_uuid = ? "
-                            + "GROUP BY block_type ORDER BY n DESC LIMIT ?", id, limit);
             List<CountEntry> tools = counts(
-                    "SELECT tool, COUNT(*) AS n FROM block_breaks WHERE player_uuid = ? "
-                            + "GROUP BY tool ORDER BY n DESC LIMIT ?", id, limit);
+                    "SELECT item, COUNT(*) AS n " + BREAKS + " AND player_uuid = ? GROUP BY item ORDER BY n DESC LIMIT ?",
+                    id, limit);
             List<CountEntry> worlds = counts(
-                    "SELECT world, COUNT(*) AS n FROM block_breaks WHERE player_uuid = ? "
-                            + "GROUP BY world ORDER BY n DESC", id);
-            List<CountEntry> catches = counts(
-                    "SELECT caught, COUNT(*) AS n FROM fishing WHERE player_uuid = ? AND caught <> 'NONE' "
-                            + "GROUP BY caught ORDER BY n DESC LIMIT ?", id, limit);
+                    "SELECT world, COUNT(*) AS n " + BREAKS + " AND player_uuid = ? GROUP BY world ORDER BY n DESC", id);
 
             List<PlayerDetail.ActivityBucket> activity = new ArrayList<>();
-            try (PreparedStatement ps = connection.prepareStatement(
-                    "SELECT (broken_at / 3600000) * 3600000 AS hour, COUNT(*) FROM block_breaks "
-                            + "WHERE player_uuid = ? AND broken_at >= ? GROUP BY hour ORDER BY hour")) {
-                ps.setString(1, id);
-                ps.setLong(2, activitySince);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        activity.add(new PlayerDetail.ActivityBucket(rs.getLong(1), rs.getLong(2)));
-                    }
+            try (PreparedStatement ps = prepare(
+                    "SELECT (created_at / 3600000) * 3600000 AS hour, COUNT(*) " + BREAKS
+                            + " AND player_uuid = ? AND created_at >= ? GROUP BY hour ORDER BY hour", id, activitySince);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    activity.add(new PlayerDetail.ActivityBucket(rs.getLong(1), rs.getLong(2)));
                 }
             }
-            return Optional.of(new PlayerDetail(found.get(0), blocks, tools, worlds, catches, activity));
+            List<PlayerDetail.SessionInfo> recent = new ArrayList<>();
+            try (PreparedStatement ps = prepare(
+                    "SELECT started_at, ended_at, " + SESSION_DURATION + ", afk_ms, end_reason FROM sessions "
+                            + "WHERE player_uuid = ? ORDER BY started_at DESC LIMIT ?", id, limit);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    long ended = rs.getLong(2);
+                    Long endedAt = rs.wasNull() ? null : ended; // direct na getLong(2) controleren
+                    recent.add(new PlayerDetail.SessionInfo(rs.getLong(1), endedAt,
+                            rs.getLong(3), rs.getLong(4), rs.getString(5)));
+                }
+            }
+            return Optional.of(new PlayerDetail(found.get(0),
+                    topSubtypes(EventTypes.BLOCK_BREAK, id, limit),
+                    topSubtypes(EventTypes.BLOCK_PLACE, id, limit),
+                    tools, worlds,
+                    topSubtypes(EventTypes.MOB_KILL, id, limit),
+                    topSubtypes(EventTypes.PVP_KILL, id, limit),
+                    topSubtypes(EventTypes.DEATH, id, limit),
+                    topSubtypes(EventTypes.FISH, id, limit),
+                    activity, recent, places(id, limit)));
         });
     }
 
+    /** Waar de speler zijn tijd doorbrengt, uit {@code position_samples}. */
+    private PlayerDetail.Places places(String id, int limit) throws SQLException {
+        long sampled = 0, underground = 0, surface = 0, withOthers = 0;
+        try (PreparedStatement ps = prepare("SELECT COALESCE(SUM(interval_ms), 0), "
+                + "COALESCE(SUM(CASE WHEN underground = 1 THEN interval_ms END), 0), "
+                + "COALESCE(SUM(CASE WHEN underground = 0 THEN interval_ms END), 0), "
+                + "COALESCE(SUM(CASE WHEN nearby_count > 0 THEN interval_ms END), 0) "
+                + "FROM position_samples WHERE player_uuid = ?", id);
+             ResultSet rs = ps.executeQuery()) {
+            if (rs.next()) {
+                sampled = rs.getLong(1);
+                underground = rs.getLong(2);
+                surface = rs.getLong(3);
+                withOthers = rs.getLong(4);
+            }
+        }
+        String time = "SUM(interval_ms) AS t FROM position_samples WHERE player_uuid = ?";
+        List<CountEntry> worlds = counts("SELECT world, " + time + " GROUP BY world ORDER BY t DESC", id);
+        List<CountEntry> biomes = counts("SELECT biome, " + time
+                + " AND biome IS NOT NULL GROUP BY biome ORDER BY t DESC LIMIT ?", id, limit);
+        List<CountEntry> vehicles = counts("SELECT vehicle, " + time
+                + " AND vehicle IS NOT NULL GROUP BY vehicle ORDER BY t DESC LIMIT ?", id, limit);
+        // nearby is een JSON-array met UUIDs; de naam is die van het laatste event van die speler
+        List<CountEntry> companions = counts("""
+                SELECT COALESCE((SELECT e.player_name FROM events e WHERE e.player_uuid = j.value
+                                 ORDER BY e.created_at DESC LIMIT 1), j.value) AS name,
+                       SUM(p.interval_ms) AS t
+                FROM position_samples p, json_each(p.nearby) j
+                WHERE p.player_uuid = ? AND p.nearby IS NOT NULL
+                GROUP BY j.value ORDER BY t DESC LIMIT ?""", id, limit);
+        return new PlayerDetail.Places(sampled, underground, surface, withOthers, worlds, biomes, vehicles, companions);
+    }
+
+    @Override
+    public CompletableFuture<List<ChunkHeat>> getBlockBreakHeatmap(UUID player) {
+        // Chunk = floor(x / 16). Met pure integer-rekenkunde, zodat negatieve
+        // coördinaten ook goed gaan (SQLite deelt richting nul af).
+        String chunkX = "((x - (((x % 16) + 16) % 16)) / 16)";
+        String chunkZ = "((z - (((z % 16) + 16) % 16)) / 16)";
+        String sql = "SELECT world, " + chunkX + " AS cx, " + chunkZ + " AS cz, COUNT(*), MIN(y), MAX(y) "
+                + BREAKS + " AND x IS NOT NULL" + (player != null ? " AND player_uuid = ?" : "")
+                + " GROUP BY world, cx, cz";
+        return query(() -> {
+            List<ChunkHeat> result = new ArrayList<>();
+            try (PreparedStatement ps = player != null ? prepare(sql, player.toString()) : prepare(sql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new ChunkHeat(rs.getString(1), rs.getInt(2), rs.getInt(3),
+                            rs.getLong(4), rs.getInt(5), rs.getInt(6)));
+                }
+            }
+            return result;
+        });
+    }
+
+    /** Duur van een sessie; bij een lopende sessie tot de laatste tussenstand. */
+    private static final String SESSION_DURATION = "(COALESCE(ended_at, last_seen_at) - started_at)";
+
+    /** {@code SUM(CASE ...)} die events van één type telt. */
+    private static String countType(String type, String alias) {
+        return "SUM(CASE WHEN e.type = '" + type + "' THEN 1 ELSE 0 END) AS " + alias;
+    }
+
     /**
-     * Eén rij per speler. SQLite neemt bij MAX() de "kale" kolom player_name uit dezelfde rij,
-     * dus dit is de naam waarmee de speler het laatst actief was.
+     * Eén rij per speler: aantallen per soort event, het laatste event van welk type dan ook,
+     * en speeltijd/AFK/sessies uit de sessions-tabel.
+     * SQLite neemt bij één MAX() de "kale" kolom player_name uit dezelfde rij, dus dit is
+     * de naam waarmee de speler het laatst actief was.
      */
-    private static final String PLAYER_SUMMARY_SQL =
-            "SELECT player_uuid, player_name, COUNT(*) AS total, MAX(broken_at) FROM block_breaks GROUP BY player_uuid";
+    private static String playerSummarySql(boolean singlePlayer) {
+        return "SELECT e.player_uuid, e.player_name, "
+                + countType(EventTypes.BLOCK_BREAK, "total") + ", "
+                + countType(EventTypes.BLOCK_PLACE, "placed") + ", "
+                + countType(EventTypes.MOB_KILL, "mob_kills") + ", "
+                + countType(EventTypes.PVP_KILL, "pvp_kills") + ", "
+                + countType(EventTypes.DEATH, "deaths") + ", "
+                + "MAX(e.created_at), "
+                + "COALESCE(s.playtime, 0) AS playtime, COALESCE(s.afk, 0), COALESCE(s.cnt, 0) "
+                + "FROM events e LEFT JOIN ("
+                + "  SELECT player_uuid, SUM(" + SESSION_DURATION + ") AS playtime, SUM(afk_ms) AS afk, COUNT(*) AS cnt "
+                + "  FROM sessions GROUP BY player_uuid"
+                + ") s ON s.player_uuid = e.player_uuid "
+                + "WHERE e.player_uuid IS NOT NULL"
+                + (singlePlayer ? " AND e.player_uuid = ?" : "")
+                + " GROUP BY e.player_uuid";
+    }
+
+    // ---------- Hulpmethodes ----------
 
     @FunctionalInterface
     private interface SqlWork<T> {
@@ -321,6 +428,28 @@ public final class SqliteDataStore implements DataStore {
         }, executor);
     }
 
+    /** Aantal events van een type, voor één speler of ({@code player == null}) iedereen. */
+    private long countOf(String type, String player) throws SQLException {
+        return player == null
+                ? single("SELECT COUNT(*) FROM events WHERE type = ?", type)
+                : single("SELECT COUNT(*) FROM events WHERE type = ? AND player_uuid = ?", type, player);
+    }
+
+    /** Meest voorkomende subtypes van een type, voor één speler of ({@code player == null}) iedereen. */
+    private List<CountEntry> topSubtypes(String type, String player, int limit) throws SQLException {
+        return player == null
+                ? counts("SELECT subtype, COUNT(*) AS n FROM events WHERE type = ? "
+                        + "GROUP BY subtype ORDER BY n DESC LIMIT ?", type, limit)
+                : counts("SELECT subtype, COUNT(*) AS n FROM events WHERE type = ? AND player_uuid = ? "
+                        + "GROUP BY subtype ORDER BY n DESC LIMIT ?", type, player, limit);
+    }
+
+    private long single(String sql, Object... params) throws SQLException {
+        try (PreparedStatement ps = prepare(sql, params); ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getLong(1) : 0;
+        }
+    }
+
     private List<CountEntry> counts(String sql, Object... params) throws SQLException {
         List<CountEntry> result = new ArrayList<>();
         try (PreparedStatement ps = prepare(sql, params); ResultSet rs = ps.executeQuery()) {
@@ -335,7 +464,9 @@ public final class SqliteDataStore implements DataStore {
         List<PlayerSummary> result = new ArrayList<>();
         try (PreparedStatement ps = prepare(sql, params); ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
-                result.add(new PlayerSummary(rs.getString(1), rs.getString(2), rs.getLong(3), rs.getLong(4)));
+                result.add(new PlayerSummary(rs.getString(1), rs.getString(2),
+                        rs.getLong(3), rs.getLong(4), rs.getLong(5), rs.getLong(6), rs.getLong(7),
+                        rs.getLong(8), rs.getLong(9), rs.getLong(10), rs.getLong(11)));
             }
         }
         return result;
@@ -350,10 +481,10 @@ public final class SqliteDataStore implements DataStore {
     }
 
     /** Schrijft alles weg en sluit de database. Blokkeert maximaal 10 seconden. */
+    @Override
     public void close() {
         executor.execute(() -> {
             flushNow();
-            flushFishingNow();
             try {
                 if (connection != null) {
                     connection.close();

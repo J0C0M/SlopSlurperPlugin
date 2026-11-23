@@ -32,6 +32,8 @@ import java.util.logging.Logger;
  *   GET /api/overview              totalen, top-blokken, meest actieve spelers
  *   GET /api/players               alle spelers met hun totaal
  *   GET /api/players/{uuid}?days=N details van één speler (activiteit van de laatste N dagen)
+ *   GET /api/heatmap[?player=uuid] gebroken blokken per chunk
+ *   GET /api/config                instellingen voor de frontend (bijv. of de 3D-kaart beschikbaar is)
  */
 public final class WebServer {
 
@@ -50,16 +52,18 @@ public final class WebServer {
     private final Logger logger;
     private final String host;
     private final int port;
+    private final String blueMapUrl; // null als BlueMap niet geïnstalleerd is
     private final Gson gson = new GsonBuilder().create();
 
     private HttpServer server;
     private ExecutorService executor;
 
-    public WebServer(DataStore store, Logger logger, String host, int port) {
+    public WebServer(DataStore store, Logger logger, String host, int port, String blueMapUrl) {
         this.store = store;
         this.logger = logger;
         this.host = host;
         this.port = port;
+        this.blueMapUrl = blueMapUrl;
     }
 
     public void start() throws IOException {
@@ -101,7 +105,24 @@ public final class WebServer {
                 path = path.substring(0, path.length() - 1);
             }
 
-            if (path.equals("/api/overview")) {
+            if (path.equals("/api/config")) {
+                Map<String, Object> config = new java.util.HashMap<>();
+                config.put("blueMapEnabled", blueMapUrl != null);
+                config.put("blueMapUrl", blueMapUrl);
+                sendJson(exchange, 200, config);
+            } else if (path.equals("/api/heatmap")) {
+                UUID player = null;
+                String q = exchange.getRequestURI().getQuery();
+                if (q != null && q.startsWith("player=")) {
+                    try {
+                        player = UUID.fromString(q.substring("player=".length()));
+                    } catch (IllegalArgumentException e) {
+                        sendJson(exchange, 400, Map.of("error", "Ongeldige UUID"));
+                        return;
+                    }
+                }
+                sendJson(exchange, 200, await(store.getBlockBreakHeatmap(player)));
+            } else if (path.equals("/api/overview")) {
                 sendJson(exchange, 200, await(store.getOverview(TOP_SIZE)));
             } else if (path.equals("/api/players")) {
                 sendJson(exchange, 200, await(store.getPlayers()));

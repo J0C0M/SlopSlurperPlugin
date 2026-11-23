@@ -16,7 +16,7 @@ import java.util.List;
 import java.util.logging.Level;
 
 /**
- * /blockstats [speler] — laat zien welke blokken een speler het meest breekt.
+ * /blockstats [speler] — laat zien hoeveel blokken een speler breekt en plaatst, en welke hij het meest breekt.
  */
 public final class BlockStatsCommand implements TabExecutor {
 
@@ -66,11 +66,18 @@ public final class BlockStatsCommand implements TabExecutor {
     }
 
     private void sendStats(CommandSender sender, String name, BlockStats stats) {
-        if (stats.total() == 0) {
-            sender.sendMessage(Component.text(name + " heeft nog geen blokken gebroken.", NamedTextColor.GRAY));
+        if (stats.total() == 0 && stats.placed() == 0) {
+            sender.sendMessage(Component.text(name + " heeft nog geen blokken gebroken of geplaatst.", NamedTextColor.GRAY));
             return;
         }
-        sender.sendMessage(Component.text("Blokken gebroken door " + name + ": " + stats.total(), NamedTextColor.GOLD));
+        sender.sendMessage(Component.text("Blokken van " + name + ": ", NamedTextColor.GOLD)
+                .append(Component.text(stats.total() + " gebroken", NamedTextColor.YELLOW))
+                .append(Component.text(", ", NamedTextColor.GOLD))
+                .append(Component.text(stats.placed() + " geplaatst", NamedTextColor.YELLOW)));
+        if (stats.top().isEmpty()) {
+            return;
+        }
+        sender.sendMessage(Component.text("Meest gebroken:", NamedTextColor.GRAY));
         int rank = 1;
         for (BlockStats.Entry entry : stats.top()) {
             sender.sendMessage(Component.text(" " + rank++ + ". ", NamedTextColor.GRAY)

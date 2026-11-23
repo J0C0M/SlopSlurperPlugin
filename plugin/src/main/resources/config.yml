@@ -7,3 +7,43 @@ dashboard:
   # 0.0.0.0   = bereikbaar voor iedereen op je netwerk (let op: spelersdata wordt dan zichtbaar).
   host: 127.0.0.1
   port: 8080
+  # Adres van de BlueMap 3D-kaart (alleen gebruikt als de BlueMap-plugin geïnstalleerd is).
+  # Het dashboard toont deze kaart op de pagina "3D-kaart".
+  bluemap-url: "http://localhost:8100/"
+
+# Trackers: elk verzamelt één soort data. Zet er een uit met enabled: false
+# en herstart de server. Een tracker die hier niet staat, staat aan.
+trackers:
+  # Sessies (join tot quit): speeltijd en AFK-tijd.
+  sessions:
+    enabled: true
+    # Na zoveel seconden zonder input telt iemand als AFK (terug vanaf zijn laatste input).
+    # 0 = nooit AFK.
+    afk-timeout-seconds: 180
+    # Hoe vaak een lopende sessie tussentijds wordt opgeslagen. Bij een crash gaat hooguit
+    # zoveel speeltijd verloren.
+    checkpoint-seconds: 60
+  # Elk blok dat een speler breekt (type, plek, gereedschap).
+  block-break:
+    enabled: true
+  # Elk blok dat een speler plaatst (type, plek).
+  block-place:
+    enabled: true
+  # Mobs en spelers die door een speler gedood worden (type, wapen, plek, afstand).
+  kills:
+    enabled: true
+  # Doodgaan: oorzaak, plek, verloren items en hoe lang de speler het volhield.
+  deaths:
+    enabled: true
+  # Vangsten bij het vissen (wat, plek van de dobber, XP).
+  fishing:
+    enabled: true
+  # Elke paar seconden per speler: wereld, positie, biome, ondergronds, voertuig
+  # en wie er in de buurt is. Basis voor "waar besteden spelers hun tijd".
+  positions:
+    enabled: true
+    # Hoe vaak een positie wordt vastgelegd. Lager = nauwkeuriger, maar meer rijen
+    # (bij 10 s: 360 per speler per uur).
+    sample-seconds: 10
+    # Spelers binnen zoveel blokken tellen als "in de buurt" (samen spelen). 0 = niet bijhouden.
+    nearby-radius: 32

@@ -2,11 +2,13 @@ name: SlopSlurperPlugin
 version: '${project.version}'
 main: com.slopslurper.plugin.SlopSlurperPlugin
 api-version: '1.21.11'
+# Optioneel: als BlueMap er is, tekenen we de heatmap op de 3D-kaart
+softdepend: [BlueMap]
 description: ${project.description}
 
 commands:
   blockstats:
-    description: Laat zien welke blokken een speler het meest breekt.
+    description: Laat zien hoeveel blokken een speler breekt en plaatst, en welke het meest.
     usage: /blockstats [speler]
     permission: slopslurper.blockstats
 

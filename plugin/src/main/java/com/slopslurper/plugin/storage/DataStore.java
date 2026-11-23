@@ -1,5 +1,6 @@
 package com.slopslurper.plugin.storage;
 
+import com.slopslurper.plugin.storage.stats.ChunkHeat;
 import com.slopslurper.plugin.storage.stats.Overview;
 import com.slopslurper.plugin.storage.stats.PlayerDetail;
 import com.slopslurper.plugin.storage.stats.PlayerSummary;
@@ -22,11 +23,20 @@ public interface DataStore {
 
     void close();
 
-    /** Zet een blokbreuk in de wachtrij. Veilig om vanaf de main thread aan te roepen. */
-    void queueBlockBreak(BlockBreakRecord record);
+    /**
+     * Zet een event in de wachtrij; het wordt binnen een paar seconden gebundeld weggeschreven.
+     * Veilig en goedkoop om vanaf de main thread (bijv. in een event listener) aan te roepen.
+     */
+    void recordEvent(GameEvent event);
 
-    /** Zet een vismoment in de wachtrij. Veilig om vanaf de main thread aan te roepen. */
-    void queueFishing(FishingRecord record);
+    /**
+     * Slaat de stand van een sessie op (nieuw of bijgewerkt, op basis van het id).
+     * Gaat via dezelfde wachtrij als events, dus ook goedkoop vanaf de main thread.
+     */
+    void saveSession(SessionRecord session);
+
+    /** Zet een positie-sample in de wachtrij. Net als events goedkoop vanaf de main thread. */
+    void recordPosition(PositionSample sample);
 
     /** Schrijft de wachtrij weg op de achtergrond. */
     void flushAsync();
@@ -45,4 +55,11 @@ public interface DataStore {
      * @param activitySince alleen activiteit vanaf dit tijdstip (epoch ms) meenemen
      */
     CompletableFuture<Optional<PlayerDetail>> getPlayer(UUID player, int limit, long activitySince);
+
+    /**
+     * Gebroken blokken per chunk, voor de heatmap.
+     *
+     * @param player alleen deze speler, of {@code null} voor iedereen
+     */
+    CompletableFuture<List<ChunkHeat>> getBlockBreakHeatmap(UUID player);
 }
