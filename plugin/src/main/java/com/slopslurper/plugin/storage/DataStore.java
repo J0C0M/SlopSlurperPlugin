@@ -25,6 +25,9 @@ public interface DataStore {
     /** Zet een blokbreuk in de wachtrij. Veilig om vanaf de main thread aan te roepen. */
     void queueBlockBreak(BlockBreakRecord record);
 
+    /** Zet een vismoment in de wachtrij. Veilig om vanaf de main thread aan te roepen. */
+    void queueFishing(FishingRecord record);
+
     /** Schrijft de wachtrij weg op de achtergrond. */
     void flushAsync();
 

@@ -2,6 +2,7 @@ package com.slopslurper.plugin;
 
 import com.slopslurper.plugin.commands.BlockStatsCommand;
 import com.slopslurper.plugin.listeners.BlockBreakListener;
+import com.slopslurper.plugin.listeners.FishingListener;
 import com.slopslurper.plugin.listeners.PlayerJoinListener;
 import com.slopslurper.plugin.storage.DataStore;
 import com.slopslurper.plugin.storage.SqliteDataStore;
@@ -33,6 +34,7 @@ public final class SlopSlurperPlugin extends JavaPlugin {
 
         getServer().getPluginManager().registerEvents(new PlayerJoinListener(this), this);
         getServer().getPluginManager().registerEvents(new BlockBreakListener(database), this);
+        getServer().getPluginManager().registerEvents(new FishingListener(database), this);
 
         BlockStatsCommand blockStats = new BlockStatsCommand(this, database);
         getCommand("blockstats").setExecutor(blockStats);

@@ -42,6 +42,7 @@ public final class SqliteDataStore implements DataStore {
         return t;
     });
     private final Queue<BlockBreakRecord> pendingBreaks = new ConcurrentLinkedQueue<>();
+    private final Queue<FishingRecord> pendingFishing = new ConcurrentLinkedQueue<>();
 
     private Connection connection;
 
@@ -73,6 +74,21 @@ public final class SqliteDataStore implements DataStore {
                         )""");
                 st.execute("CREATE INDEX IF NOT EXISTS idx_block_breaks_player ON block_breaks(player_uuid, block_type)");
                 st.execute("CREATE INDEX IF NOT EXISTS idx_block_breaks_time ON block_breaks(broken_at)");
+                st.execute("""
+                        CREATE TABLE IF NOT EXISTS fishing (
+                            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                            player_uuid TEXT    NOT NULL,
+                            player_name TEXT    NOT NULL,
+                            state       TEXT    NOT NULL,
+                            caught      TEXT    NOT NULL,
+                            world       TEXT    NOT NULL,
+                            x           INTEGER NOT NULL,
+                            y           INTEGER NOT NULL,
+                            z           INTEGER NOT NULL,
+                            xp          INTEGER NOT NULL,
+                            fished_at   INTEGER NOT NULL
+                        )""");
+                st.execute("CREATE INDEX IF NOT EXISTS idx_fishing_player ON fishing(player_uuid, caught)");
             }
             return null;
         }).get();
@@ -83,10 +99,60 @@ public final class SqliteDataStore implements DataStore {
         pendingBreaks.add(record);
     }
 
+    @Override
+    public void queueFishing(FishingRecord record) {
+        pendingFishing.add(record);
+    }
+
     /** Schrijft de wachtrij weg op de achtergrondthread. */
     public void flushAsync() {
         if (!pendingBreaks.isEmpty()) {
             executor.execute(this::flushNow);
+        }
+        if (!pendingFishing.isEmpty()) {
+            executor.execute(this::flushFishingNow);
+        }
+    }
+
+    private void flushFishingNow() {
+        List<FishingRecord> batch = new ArrayList<>();
+        FishingRecord r;
+        while ((r = pendingFishing.poll()) != null) {
+            batch.add(r);
+        }
+        if (batch.isEmpty() || connection == null) {
+            return;
+        }
+        String sql = "INSERT INTO fishing (player_uuid, player_name, state, caught, world, x, y, z, xp, fished_at) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            connection.setAutoCommit(false);
+            for (FishingRecord f : batch) {
+                ps.setString(1, f.playerUuid().toString());
+                ps.setString(2, f.playerName());
+                ps.setString(3, f.state());
+                ps.setString(4, f.caught());
+                ps.setString(5, f.world());
+                ps.setInt(6, f.x());
+                ps.setInt(7, f.y());
+                ps.setInt(8, f.z());
+                ps.setInt(9, f.xp());
+                ps.setLong(10, f.fishedAt());
+                ps.addBatch();
+            }
+            ps.executeBatch();
+            connection.commit();
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Kon " + batch.size() + " vismomenten niet opslaan", e);
+            try {
+                connection.rollback();
+            } catch (SQLException ignored) {
+            }
+        } finally {
+            try {
+                connection.setAutoCommit(true);
+            } catch (SQLException ignored) {
+            }
         }
     }
 
@@ -284,6 +350,7 @@ public final class SqliteDataStore implements DataStore {
     public void close() {
         executor.execute(() -> {
             flushNow();
+            flushFishingNow();
             try {
                 if (connection != null) {
                     connection.close();
