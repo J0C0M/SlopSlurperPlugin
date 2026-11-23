@@ -277,6 +277,9 @@ public final class SqliteDataStore implements DataStore {
             List<CountEntry> worlds = counts(
                     "SELECT world, COUNT(*) AS n FROM block_breaks WHERE player_uuid = ? "
                             + "GROUP BY world ORDER BY n DESC", id);
+            List<CountEntry> catches = counts(
+                    "SELECT caught, COUNT(*) AS n FROM fishing WHERE player_uuid = ? AND caught <> 'NONE' "
+                            + "GROUP BY caught ORDER BY n DESC LIMIT ?", id, limit);
 
             List<PlayerDetail.ActivityBucket> activity = new ArrayList<>();
             try (PreparedStatement ps = connection.prepareStatement(
@@ -290,7 +293,7 @@ public final class SqliteDataStore implements DataStore {
                     }
                 }
             }
-            return Optional.of(new PlayerDetail(found.get(0), blocks, tools, worlds, activity));
+            return Optional.of(new PlayerDetail(found.get(0), blocks, tools, worlds, catches, activity));
         });
     }
 

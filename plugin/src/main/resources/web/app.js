@@ -199,7 +199,8 @@
                 card("Wanneer speelt deze speler?", columnChart(perHourOfDay(detail.activity), 3), true),
                 card("Meest gebroken blokken", barList(detail.topBlocks)),
                 card("Gereedschap", barList(detail.tools)),
-                card("Werelden", barList(detail.worlds, prettyWorld))),
+                card("Werelden", barList(detail.worlds, prettyWorld)),
+                card("Gevangen bij het vissen", barList(detail.catches))),
         ];
     }
 

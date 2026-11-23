@@ -11,6 +11,7 @@ public record PlayerDetail(
         List<CountEntry> topBlocks,
         List<CountEntry> tools,
         List<CountEntry> worlds,
+        List<CountEntry> catches,
         List<ActivityBucket> activity
 ) {
 
