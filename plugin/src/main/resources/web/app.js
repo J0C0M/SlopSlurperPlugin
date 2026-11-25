@@ -303,8 +303,23 @@
                     h("td", {}, s.endedAt == null ? h("span", { class: "live" }, "● Speelt nog") : endReason(s.endReason)))))));
     }
 
-    async function renderPlayer(uuid) {
-        const detail = await api(`/api/players/${encodeURIComponent(uuid)}?days=${DAYS}`);
+    /** Laatst opgehaalde speler, zodat wisselen van tabblad niet op de server hoeft te wachten. */
+    let cachedPlayer = { uuid: null, detail: null };
+
+    /** Tabbladen van de spelerspagina. Elk geeft blokken {title, content, wide?, empty?} terug. */
+    const PLAYER_TABS = [
+        { id: "activiteit", label: "Activiteit", blocks: activityBlocks },
+        { id: "blokken", label: "Blokken", blocks: blockBlocks },
+        { id: "gevecht", label: "Gevecht", blocks: combatBlocks },
+        { id: "items", label: "Items", blocks: itemBlocks },
+        { id: "locaties", label: "Locaties", blocks: placeBlocks },
+    ];
+
+    async function renderPlayer(uuid, tabId, useCache) {
+        if (!useCache || cachedPlayer.uuid !== uuid) {
+            cachedPlayer = { uuid, detail: await api(`/api/players/${encodeURIComponent(uuid)}?days=${DAYS}`) };
+        }
+        const detail = cachedPlayer.detail;
         const back = h("a", { href: "#/", class: "back" }, "← Overzicht");
 
         if (!detail) {
@@ -313,11 +328,8 @@
         }
 
         const p = detail.player;
-        const favBlock = detail.topBlocks[0];
-        const favTool = detail.tools[0];
         const topCause = detail.deathCauses[0];
-        const places = detail.places;
-        const hasPlaces = places && places.sampledMs > 0;
+        const active = PLAYER_TABS.find(t => t.id === tabId) ?? PLAYER_TABS[0];
 
         return [
             back,
@@ -330,56 +342,94 @@
                     p.sessions ? `gem. ${duration(p.playtimeMs / p.sessions)}` : null),
                 kpi("Blokken gebroken", nf.format(p.totalBreaks), `${nf.format(p.totalPlaced)} geplaatst`),
                 kpi("Mobs gedood", nf.format(p.mobKills), p.pvpKills ? `en ${nf.format(p.pvpKills)} spelers` : null),
-                kpi("Doodgegaan", nf.format(p.deaths), topCause ? `meestal: ${deathCause(topCause.key)}` : null),
-                kpi("Favoriete blok", favBlock ? pretty(favBlock.key) : "–"),
-                kpi("Meest gebruikt", favTool ? pretty(favTool.key) : "–")),
-            h("div", { class: "grid" },
-                card("Laatste sessies", sessionTable(detail.sessions || []), true),
-                card(`Blokken per dag (laatste ${DAYS} dagen)`, columnChart(perDay(detail.activity, DAYS), 2), true),
-                card("Wanneer speelt deze speler?", columnChart(perHourOfDay(detail.activity), 3), true),
-                card("Meest gebroken blokken", barList(detail.topBlocks)),
-                card("Meest geplaatste blokken", barList(detail.topPlaced)),
-                card("Gereedschap", barList(detail.tools)),
-                hasPlaces
-                    ? card("Tijd per wereld", barList(places.worlds, prettyWorld, duration))
-                    : card("Werelden (gebroken blokken)", barList(detail.worlds, prettyWorld)),
-                card("Gedode mobs", barList(detail.mobKills)),
-                card("Doodsoorzaken", barList(detail.deathCauses, deathCause)),
-                card("Gevangen bij het vissen", barList(detail.catches)),
-                detail.pvpVictims.length ? card("Gedode spelers", barList(detail.pvpVictims, asIs)) : null,
-                card("Schade uitgedeeld", barList(detail.health.damageDealt, pretty, hearts)),
-                card("Schade gekregen", barList(detail.health.damageTaken, deathCause, hearts)),
-                card("Genezing", barList(detail.health.healed, healReason, hearts)),
-                card("Gegeten", barList(detail.health.food)),
-                card("Gecraft", barList(detail.crafting.crafted)),
-                card("Gesmolten", barList(detail.crafting.smelted)),
-                card("Geënchant", barList(detail.crafting.enchanted)),
-                card("Aambeeld", barList(detail.crafting.anvil, anvilOperation)),
-                card("Gebrouwen", barList(detail.crafting.brewed)),
-                ...placeCards(places)),
+                kpi("Doodgegaan", nf.format(p.deaths), topCause ? `meestal: ${deathCause(topCause.key)}` : null)),
+            h("nav", { class: "tabs", "aria-label": "Gegevens van deze speler" }, PLAYER_TABS.map(t =>
+                h("a", {
+                    href: `#/speler/${uuid}/${t.id}`,
+                    class: t === active ? "active" : null,
+                    "aria-current": t === active ? "page" : null,
+                    "data-tab": t.id,
+                }, t.label))),
+            ...blockGrid(active.blocks(detail)),
         ];
     }
 
-    /** Kaarten uit de positie-samples: biomen, ondergronds, voertuigen en met wie. */
-    function placeCards(places) {
+    /** Balkenlijst als blok; zonder data komt alleen de titel onderaan te staan. */
+    function bars(title, entries, labelFn, valueFn) {
+        return { title, content: barList(entries, labelFn, valueFn), empty: !(entries || []).some(e => e.amount > 0) };
+    }
+
+    /** Kaarten met data, en de lege categorieën samen op één regel. */
+    function blockGrid(blocks) {
+        const filled = blocks.filter(b => !b.empty);
+        const none = blocks.filter(b => b.empty).map(b => b.title);
+        return [
+            filled.length ? h("div", { class: "grid" }, filled.map(b => card(b.title, b.content, b.wide))) : null,
+            none.length ? h("p", { class: "hint" }, `Nog geen data: ${none.join(", ")}.`) : null,
+        ].filter(Boolean);
+    }
+
+    function activityBlocks(d) {
+        return [
+            { title: `Blokken per dag (laatste ${DAYS} dagen)`, content: columnChart(perDay(d.activity, DAYS), 2) },
+            { title: "Wanneer speelt deze speler?", content: columnChart(perHourOfDay(d.activity), 3) },
+            { title: "Laatste sessies", content: sessionTable(d.sessions || []), wide: true },
+        ];
+    }
+
+    function blockBlocks(d) {
+        return [
+            bars("Meest gebroken blokken", d.topBlocks),
+            bars("Meest geplaatste blokken", d.topPlaced),
+            bars("Gereedschap", d.tools),
+            bars("Gebroken per wereld", d.worlds, prettyWorld),
+        ];
+    }
+
+    function combatBlocks(d) {
+        return [
+            bars("Gedode mobs", d.mobKills),
+            bars("Gedode spelers", d.pvpVictims, asIs),
+            bars("Doodsoorzaken", d.deathCauses, deathCause),
+            bars("Schade uitgedeeld", d.health.damageDealt, pretty, hearts),
+            bars("Schade gekregen", d.health.damageTaken, deathCause, hearts),
+            bars("Genezing", d.health.healed, healReason, hearts),
+        ];
+    }
+
+    function itemBlocks(d) {
+        return [
+            bars("Gecraft", d.crafting.crafted),
+            bars("Gesmolten", d.crafting.smelted),
+            bars("Gegeten", d.health.food),
+            bars("Gevangen bij het vissen", d.catches),
+            bars("Geënchant", d.crafting.enchanted),
+            bars("Aambeeld", d.crafting.anvil, anvilOperation),
+            bars("Gebrouwen", d.crafting.brewed),
+        ];
+    }
+
+    /** Uit de positie-samples: werelden, biomen, ondergronds, voertuigen en met wie. */
+    function placeBlocks({ places }) {
         if (!places || !places.sampledMs) {
-            return [card("Waar speelt deze speler?", h("p", { class: "muted" },
-                "Nog geen positie-data. Zolang de speler online is, wordt elke paar seconden vastgelegd waar hij is."), true)];
+            return [{ title: "Waar speelt deze speler?", wide: true, content: h("p", { class: "muted" },
+                "Nog geen positie-data. Zolang de speler online is, wordt elke paar seconden vastgelegd waar hij is.") }];
         }
         const depth = [
             { key: "Ondergronds of binnen", amount: places.undergroundMs },
             { key: "Bovengronds", amount: places.surfaceMs },
         ];
+        const companions = bars("Speelt het meest met", places.companions, asIs, duration);
+        companions.content = h("div", {},
+            h("p", { class: "muted" },
+                `${percent(places.withOthersMs, places.sampledMs)} van de tijd met andere spelers in de buurt.`),
+            companions.content);
         return [
-            card("Biomen", barList(places.biomes, pretty, duration)),
-            card("Ondergronds of bovengronds", barList(depth, asIs, duration,
-                "Alleen bekend in de overworld.")),
-            card("Onderweg", barList(places.vehicles, pretty, duration,
-                "Nog niet in een boot, minecart, op een paard of met elytra geweest.")),
-            card("Speelt het meest met", h("div", {},
-                h("p", { class: "muted" },
-                    `${percent(places.withOthersMs, places.sampledMs)} van de tijd met andere spelers in de buurt.`),
-                barList(places.companions, asIs, duration, "Nog niet samen met anderen gespeeld."))),
+            bars("Tijd per wereld", places.worlds, prettyWorld, duration),
+            bars("Biomen", places.biomes, pretty, duration),
+            bars("Ondergronds of bovengronds", depth, asIs, duration),
+            bars("Onderweg", places.vehicles, pretty, duration),
+            companions,
         ];
     }
 
@@ -430,15 +480,19 @@
         });
     }
 
-    async function render() {
+    const PLAYER_ROUTE = /^#\/speler\/([0-9a-fA-F-]{36})(?:\/([a-z]+))?$/;
+
+    async function render(useCache = false) {
         const id = ++renderId;
         updateNav();
-        const match = location.hash.match(/^#\/speler\/([0-9a-fA-F-]{36})$/);
+        const match = location.hash.match(PLAYER_ROUTE);
         try {
             const content = isMapRoute() ? await renderMap()
-                : match ? await renderPlayer(match[1]) : await renderOverview();
+                : match ? await renderPlayer(match[1], match[2], useCache) : await renderOverview();
             if (id !== renderId) return; // inmiddels naar een andere pagina genavigeerd
+            const focusedTab = document.activeElement?.dataset?.tab; // toetsenbordfocus niet kwijtraken
             app.replaceChildren(...content);
+            if (focusedTab) app.querySelector(`[data-tab="${focusedTab}"]`)?.focus({ preventScroll: true });
             status.textContent = `Bijgewerkt om ${new Date().toLocaleTimeString("nl-NL")}`;
             status.classList.remove("error");
         } catch (err) {
@@ -452,7 +506,13 @@
         }
     }
 
-    window.addEventListener("hashchange", () => {
+    window.addEventListener("hashchange", event => {
+        const from = new URL(event.oldURL).hash.match(PLAYER_ROUTE);
+        const to = location.hash.match(PLAYER_ROUTE);
+        if (from && to && from[1] === to[1]) { // ander tabblad van dezelfde speler
+            render(true);
+            return;
+        }
         app.replaceChildren();
         window.scrollTo(0, 0);
         render();
