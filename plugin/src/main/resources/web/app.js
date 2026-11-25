@@ -6,6 +6,7 @@
     const DAYS = 14;
     const app = document.getElementById("app");
     const status = document.getElementById("status");
+    const filter = document.getElementById("filter");
     const nf = new Intl.NumberFormat("nl-NL");
 
     // ---------- Hulpfuncties ----------
@@ -33,6 +34,17 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
     }
+
+    const FILTER_KEY = "slopslurper-players";
+    try { // keuze van de vorige keer; zonder opslag gewoon echte spelers
+        const saved = localStorage.getItem(FILTER_KEY);
+        if ([...filter.options].some(o => o.value === saved)) filter.value = saved;
+    } catch { /* geen opslag beschikbaar */ }
+
+    /** API-pad voor de spelers die bovenaan gekozen zijn. */
+    const filtered = path => `${path}?players=${filter.value}`;
+
+    const inFilter = p => filter.value === "all" || p.bot === (filter.value === "bots");
 
     /** STONE_BRICKS -> "Stone bricks" */
     function pretty(name) {
@@ -234,14 +246,16 @@
     // ---------- Pagina's ----------
 
     async function renderOverview() {
-        const [overview, players] = await Promise.all([api("/api/overview"), api("/api/players")]);
+        const [overview, players] = await Promise.all([api(filtered("/api/overview")), api(filtered("/api/players"))]);
 
         if (!overview || overview.playerCount === 0) {
             return [
                 h("h1", {}, "Overzicht"),
                 h("p", { class: "subtitle" }, "Wat spelers op deze server doen."),
                 h("div", { class: "card" }, empty("Nog geen data",
-                    "Join de server en breek een paar blokken. Dit dashboard ververst vanzelf.")),
+                    filter.value === "bots" ? "Er hebben nog geen bots gespeeld (zie Testbots in de README)."
+                        : "Join de server en breek een paar blokken. Dit dashboard ververst vanzelf. "
+                            + (filter.value === "real" ? "Data van bots zie je door bovenaan Bots te kiezen." : ""))),
             ];
         }
 
@@ -258,7 +272,8 @@
                 h("th", { class: "num" }, "Laatst actief"))),
             h("tbody", {}, players.map(p =>
                 h("tr", { onclick: () => { location.hash = `#/speler/${p.uuid}`; } },
-                    h("td", {}, h("a", { href: `#/speler/${p.uuid}`, class: "player-cell" }, avatar(p.name), p.name)),
+                    h("td", {}, h("a", { href: `#/speler/${p.uuid}`, class: "player-cell" }, avatar(p.name), p.name,
+                        p.bot ? h("span", { class: "muted" }, "(bot)") : null)),
                     h("td", { class: "num", title: afkShare(p.afkMs, p.playtimeMs) ?? "" }, duration(p.playtimeMs)),
                     h("td", { class: "num" }, nf.format(p.totalBreaks)),
                     h("td", { class: "num" }, nf.format(p.totalPlaced)),
@@ -490,15 +505,16 @@
         }
 
         async function load() {
-            const forPlayer = player;
+            const forPlayer = player, forFilter = filter.value;
             const [players, data] = await Promise.all([api("/api/players"),
-                api("/api/heatmap/positions" + (player ? `?player=${player}` : ""))]);
-            if (forPlayer !== player) return; // inmiddels een andere speler gekozen
+                api(player ? `/api/heatmap/positions?player=${player}` : filtered("/api/heatmap/positions"))]);
+            if (forPlayer !== player || forFilter !== filter.value) return; // inmiddels iets anders gekozen
             cells = data || [];
             const worlds = new Set(["world", "world_nether", "world_the_end", world, ...cells.map(c => c.world)]);
             if (document.activeElement !== worldSelect) fillSelect(worldSelect, [...worlds].map(w => [w, prettyWorld(w)]), world);
             if (document.activeElement !== playerSelect) {
-                fillSelect(playerSelect, [["", "Iedereen"], ...(players || []).map(p => [p.uuid, p.name])], player);
+                fillSelect(playerSelect, [["", "Alle getoonde spelers"],
+                    ...(players || []).filter(p => inFilter(p) || p.uuid === player).map(p => [p.uuid, p.name])], player);
             }
             shown = cells.filter(c => c.world === world).sort((a, b) => a.timeMs - b.timeMs);
             none.hidden = shown.length > 0;
@@ -652,7 +668,7 @@
     }
 
     async function renderMap() {
-        const [config, cells] = await Promise.all([api("/api/config"), api("/api/heatmap").catch(() => [])]);
+        const [config, cells] = await Promise.all([api("/api/config"), api(filtered("/api/heatmap")).catch(() => [])]);
         const head = h("div", { class: "map-head" },
             h("div", {},
                 h("h1", {}, "3D-kaart"),
@@ -669,7 +685,7 @@
             h("iframe", { class: "map-frame", src: blueMapStartUrl(config.blueMapUrl, cells || []), title: "BlueMap 3D-kaart van de wereld", allowfullscreen: "" }),
             h("p", { class: "hint" },
                 "Elke kolom is een chunk (16×16 blokken), van de laagste tot de hoogste plek waar gegraven is. ",
-                "De heatmap wordt elke minuut bijgewerkt. Aan/uit via het lagen-menu in BlueMap (“SlopSlurper: gebroken blokken”). ",
+                "De heatmap wordt elke minuut bijgewerkt. Aan/uit via het lagen-menu in BlueMap (“SlopSlurper: gebroken blokken”; bots hebben een eigen laag die standaard uit staat). ",
                 h("a", { href: config.blueMapUrl, target: "_blank", rel: "noopener" }, "Open de kaart los ↗"))),
         ];
     }
@@ -715,6 +731,15 @@
             }
         }
     }
+
+    filter.addEventListener("change", () => {
+        try {
+            localStorage.setItem(FILTER_KEY, filter.value);
+        } catch { /* geen opslag: keuze geldt alleen nu */ }
+        const heat = location.hash.match(HEAT_ROUTE);
+        if (heat?.[2]) history.replaceState(null, "", `#/heatmap/${heat[1]}`); // gekozen speler past misschien niet
+        render();
+    });
 
     window.addEventListener("hashchange", event => {
         const from = new URL(event.oldURL).hash.match(PLAYER_ROUTE);

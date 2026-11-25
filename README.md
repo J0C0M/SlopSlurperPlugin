@@ -126,6 +126,8 @@ Opties:
 
 Wil je zien wat een bot precies doet, zet dan eerst `$env:BOTS_DEBUG=1` (Bash: `BOTS_DEBUG=1 ./start-bots.sh`).
 
+**Rapport.** Stop je de bots met Ctrl+C, dan zie je per bot wat hij gedaan heeft: nieuwe mijlpalen (met de tijd online tot dan), afstand, blokken, kills, doden met oorzaak, en hoe vaak hij vastzat of opnieuw moest inloggen. Ook zie je plekken waar hij hetzelfde blok minstens drie keer plaatste en weer brak, want dat vervuilt de data. Het rapport staat daarna in `bots/reports/`. Elke 5 minuten wordt een tussenstand opgeslagen, zodat je na een crash ook iets hebt. De cijfers komen van de bots zelf en kunnen iets afwijken van het dashboard.
+
 **Aan de bots werken.**
 
 | Bestand | Wat |
@@ -133,8 +135,10 @@ Wil je zien wat een bot precies doet, zet dan eerst `$env:BOTS_DEBUG=1` (Bash: `
 | `bots/bots.js` | De bots zelf: speelstijlen, activiteiten, samen spelen, huizen, lopen en losmaken |
 | `bots/progress.js` | Het doelenpad: verzamelen, maken, smelten, mijnen, eten en overleven |
 | `bots/schedule.js` | De speelschema's en hun tijden |
+| `bots/report.js` | Het rapport per run |
 | `bots/patches/` | Patches op `mineflayer-pathfinder` (van Mindcraft) en `prismarine-physics` (eigen fix). Die worden bij elke `npm ci` automatisch toegepast (via `patch-package`) |
 | `bots/state/` | Per bot zijn mijlpalen, mijningang en huis (niet in git) |
+| `bots/reports/` | Rapporten van eerdere runs (niet in git) |
 
 De pathfinder-patch komt uit [Mindcraft](https://github.com/mindcraft-bots/mindcraft) (MIT-licentie). Ook het idee om eerst een route zonder graven en bouwen te zoeken, en opnieuw in te loggen als laatste redmiddel, komt daarvandaan. De patch:
 - repareert het neerzetten van opstapjes: de pathfinder bleef soms in "bouwen" hangen, of hield springen ingedrukt;
@@ -146,7 +150,8 @@ Werk je een van die pakketten bij naar een nieuwe versie? Kijk dan of de patch n
 **Let op:**
 - In botmodus staat de server in **offline mode**: iedereen kan inloggen met elke naam, ook die van een op. Daarom luistert de server dan alleen op `127.0.0.1`, zodat alleen jouw eigen pc erop kan. Start je later weer zonder `-Bots`, dan zet het script online mode vanzelf terug.
 - Log je in botmodus zelf in, dan krijg je een andere UUID dan normaal. Je bent dan voor de plugin (en voor je inventory in de wereld) een andere speler.
-- Botdata komt in dezelfde `data.db` als echte data. Wil je ze later uit elkaar houden: de bots herken je aan hun naam. Of start met `-Reset` voor een schone database; let op, dat wist ook je hele wereld in `run/`.
+- Botdata komt in dezelfde `data.db` als echte data, maar het dashboard houdt ze uit elkaar. Het toont standaard alleen **echte spelers**; kies bovenaan **Bots** om te zien wat de bots doen, of **Iedereen** voor alles samen.
+- Het verschil zit in de UUID: zonder Minecraft-account (offline mode) is die versie 3, met account versie 4. Daardoor werkt het ook voor oude data en met een andere `--prefix`. Log je zelf in botmodus in, dan tel je dus als bot. Op een server die altijd in offline mode draait, telt iedereen als bot.
 - De bots hakken en bouwen in je eigen wereld in `run/`. Is die je dierbaar, maak dan eerst een kopie.
 
 ## Werken aan de plugin
@@ -182,6 +187,7 @@ De plugin slaat spelersdata op in `run/plugins/SlopSlurperPlugin/data.db` (SQLit
   - **Overzicht:** alle spelers met speeltijd, gebroken en geplaatste blokken, kills en doden, plus de meest gebroken en geplaatste blokken, de meest gedode mobs en de doodsoorzaken.
   - **Per speler:** verdeeld over de tabbladen Activiteit, Blokken, Gevecht, Items en Locaties: speeltijd en AFK, de laatste sessies, activiteit per dag en per uur, blokken, gereedschap, gedode mobs en spelers, doodsoorzaken, schade, genezing, eten, crafting, smelten, enchanten, aambeeld, brouwen, en uit de posities: tijd per wereld en biome, ondergronds of bovengronds, tijd in voertuigen en met wie de speler het meest speelt.
   - **Heatmap:** waar spelers hun tijd doorbrengen, per wereld en voor iedereen of één speler. Je kunt zoomen (scrollen of knoppen) en slepen.
+  - **Toon:** bovenaan kies je echte spelers (standaard), bots of iedereen (zie [Testbots](#testbots)). Je browser onthoudt de keuze.
   - De pagina ververst elke 10 seconden.
 
 Het dashboard is standaard alleen bereikbaar vanaf je eigen pc. De poort en het adres stel je in via `run/plugins/SlopSlurperPlugin/config.yml`.
@@ -195,7 +201,7 @@ Op de dashboardpagina **3D-kaart** zie je de wereld in 3D, met een heatmap van w
   1. Start de server één keer. BlueMap maakt dan zijn configuratie aan.
   2. Zet in `run/plugins/BlueMap/core.conf` `accept-download: false` op `true` en sla het bestand op.
   3. Start de server opnieuw. BlueMap rendert de wereld, wat de eerste keer even duurt.
-- De losse kaart draait op http://localhost:8100/. De heatmap wordt elke minuut bijgewerkt. In BlueMap zet je hem aan of uit via het lagen-menu ("SlopSlurper: gebroken blokken").
+- De losse kaart draait op http://localhost:8100/. De heatmap wordt elke minuut bijgewerkt. In BlueMap zet je hem aan of uit via het lagen-menu ("SlopSlurper: gebroken blokken"). Bots hebben een eigen laag, die standaard uit staat.
 - Let op: BlueMap is standaard bereikbaar vanaf je hele netwerk. Wil je dat niet, zet dan in `run/plugins/BlueMap/webserver.conf` `ip: "127.0.0.1"`.
 - Geen 3D-kaart nodig? Start met `-NoBlueMap`, of verwijder `run/plugins/bluemap-5.16-paper.jar`. De plugin werkt ook zonder BlueMap.
 
@@ -211,6 +217,8 @@ Het dashboard haalt alles uit een JSON-API. Wil je later een andere frontend of 
 | `GET /api/heatmap[?player={uuid}]` | Gebroken blokken per chunk (wereld, chunk x/z, aantal, min/max y) |
 | `GET /api/heatmap/positions[?player={uuid}&world={naam}]` | Doorgebrachte tijd per chunk (wereld, chunk x/z, tijd in ms), uit de positie-samples |
 | `GET /api/config` | Instellingen voor de frontend, bijvoorbeeld of de 3D-kaart beschikbaar is |
+
+`overview`, `players` en beide heatmaps accepteren `players=real` (alleen echte spelers), `players=bots` of `players=all` (standaard). Elke speler heeft een veld `bot`.
 
 ### Opbouw
 

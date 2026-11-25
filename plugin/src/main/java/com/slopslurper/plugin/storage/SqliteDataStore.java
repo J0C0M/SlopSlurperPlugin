@@ -255,37 +255,41 @@ public final class SqliteDataStore implements DataStore {
     }
 
     @Override
-    public CompletableFuture<Overview> getOverview(int limit) {
+    public CompletableFuture<Overview> getOverview(int limit, PlayerFilter filter) {
         return query(() -> {
-            long players = single("SELECT COUNT(DISTINCT player_uuid) FROM events WHERE player_uuid IS NOT NULL");
-            long playtime = single("SELECT COALESCE(SUM(" + SESSION_DURATION + "), 0) FROM sessions");
-            long afk = single("SELECT COALESCE(SUM(afk_ms), 0) FROM sessions");
-            List<PlayerSummary> topPlayers = summaries(playerSummarySql(false) + " ORDER BY playtime DESC, total DESC LIMIT ?", limit);
+            long players = single("SELECT COUNT(DISTINCT player_uuid) FROM events WHERE player_uuid IS NOT NULL"
+                    + filter.and("player_uuid"));
+            long playtime = single("SELECT COALESCE(SUM(" + SESSION_DURATION + "), 0) FROM sessions WHERE 1 = 1"
+                    + filter.and("player_uuid"));
+            long afk = single("SELECT COALESCE(SUM(afk_ms), 0) FROM sessions WHERE 1 = 1"
+                    + filter.and("player_uuid"));
+            List<PlayerSummary> topPlayers = summaries(
+                    playerSummarySql(false, filter) + " ORDER BY playtime DESC, total DESC LIMIT ?", limit);
             return new Overview(
-                    countOf(EventTypes.BLOCK_BREAK, null),
-                    countOf(EventTypes.BLOCK_PLACE, null),
-                    countOf(EventTypes.MOB_KILL, null),
-                    countOf(EventTypes.PVP_KILL, null),
-                    countOf(EventTypes.DEATH, null),
+                    countOf(EventTypes.BLOCK_BREAK, filter),
+                    countOf(EventTypes.BLOCK_PLACE, filter),
+                    countOf(EventTypes.MOB_KILL, filter),
+                    countOf(EventTypes.PVP_KILL, filter),
+                    countOf(EventTypes.DEATH, filter),
                     players, playtime, afk,
-                    topSubtypes(EventTypes.BLOCK_BREAK, null, limit),
-                    topSubtypes(EventTypes.BLOCK_PLACE, null, limit),
-                    topSubtypes(EventTypes.MOB_KILL, null, limit),
-                    topSubtypes(EventTypes.DEATH, null, limit),
+                    topSubtypes(EventTypes.BLOCK_BREAK, filter, limit),
+                    topSubtypes(EventTypes.BLOCK_PLACE, filter, limit),
+                    topSubtypes(EventTypes.MOB_KILL, filter, limit),
+                    topSubtypes(EventTypes.DEATH, filter, limit),
                     topPlayers);
         });
     }
 
     @Override
-    public CompletableFuture<List<PlayerSummary>> getPlayers() {
-        return query(() -> summaries(playerSummarySql(false) + " ORDER BY playtime DESC, total DESC"));
+    public CompletableFuture<List<PlayerSummary>> getPlayers(PlayerFilter filter) {
+        return query(() -> summaries(playerSummarySql(false, filter) + " ORDER BY playtime DESC, total DESC"));
     }
 
     @Override
     public CompletableFuture<Optional<PlayerDetail>> getPlayer(UUID player, int limit, long activitySince) {
         String id = player.toString();
         return query(() -> {
-            List<PlayerSummary> found = summaries(playerSummarySql(true), id);
+            List<PlayerSummary> found = summaries(playerSummarySql(true, PlayerFilter.ALL), id);
             if (found.isEmpty()) {
                 return Optional.empty();
             }
@@ -380,9 +384,10 @@ public final class SqliteDataStore implements DataStore {
     }
 
     @Override
-    public CompletableFuture<List<ChunkHeat>> getBlockBreakHeatmap(UUID player) {
+    public CompletableFuture<List<ChunkHeat>> getBlockBreakHeatmap(UUID player, PlayerFilter filter) {
         String sql = "SELECT world, " + CHUNK_X + " AS cx, " + CHUNK_Z + " AS cz, COUNT(*), MIN(y), MAX(y) "
                 + BREAKS + " AND x IS NOT NULL" + (player != null ? " AND player_uuid = ?" : "")
+                + filter.and("player_uuid")
                 + " GROUP BY world, cx, cz";
         return query(() -> {
             List<ChunkHeat> result = new ArrayList<>();
@@ -398,9 +403,9 @@ public final class SqliteDataStore implements DataStore {
     }
 
     @Override
-    public CompletableFuture<List<PositionHeat>> getPositionHeatmap(UUID player, String world) {
+    public CompletableFuture<List<PositionHeat>> getPositionHeatmap(UUID player, String world, PlayerFilter filter) {
         List<Object> params = new ArrayList<>();
-        String where = " WHERE 1 = 1";
+        String where = " WHERE 1 = 1" + filter.and("player_uuid");
         if (player != null) {
             where += " AND player_uuid = ?";
             params.add(player.toString());
@@ -436,7 +441,7 @@ public final class SqliteDataStore implements DataStore {
      * SQLite neemt bij één MAX() de "kale" kolom player_name uit dezelfde rij, dus dit is
      * de naam waarmee de speler het laatst actief was.
      */
-    private static String playerSummarySql(boolean singlePlayer) {
+    private static String playerSummarySql(boolean singlePlayer, PlayerFilter filter) {
         return "SELECT e.player_uuid, e.player_name, "
                 + countType(EventTypes.BLOCK_BREAK, "total") + ", "
                 + countType(EventTypes.BLOCK_PLACE, "placed") + ", "
@@ -451,6 +456,7 @@ public final class SqliteDataStore implements DataStore {
                 + ") s ON s.player_uuid = e.player_uuid "
                 + "WHERE e.player_uuid IS NOT NULL"
                 + (singlePlayer ? " AND e.player_uuid = ?" : "")
+                + filter.and("e.player_uuid")
                 + " GROUP BY e.player_uuid";
     }
 
@@ -473,20 +479,26 @@ public final class SqliteDataStore implements DataStore {
         }, executor);
     }
 
-    /** Aantal events van een type, voor één speler of ({@code player == null}) iedereen. */
+    /** Aantal events van een type, voor één speler. */
     private long countOf(String type, String player) throws SQLException {
-        return player == null
-                ? single("SELECT COUNT(*) FROM events WHERE type = ?", type)
-                : single("SELECT COUNT(*) FROM events WHERE type = ? AND player_uuid = ?", type, player);
+        return single("SELECT COUNT(*) FROM events WHERE type = ? AND player_uuid = ?", type, player);
     }
 
-    /** Meest voorkomende subtypes van een type, voor één speler of ({@code player == null}) iedereen. */
+    /** Aantal events van een type, voor alle spelers binnen het filter. */
+    private long countOf(String type, PlayerFilter filter) throws SQLException {
+        return single("SELECT COUNT(*) FROM events WHERE type = ?" + filter.and("player_uuid"), type);
+    }
+
+    /** Meest voorkomende subtypes van een type, voor één speler. */
     private List<CountEntry> topSubtypes(String type, String player, int limit) throws SQLException {
-        return player == null
-                ? counts("SELECT subtype, COUNT(*) AS n FROM events WHERE type = ? "
-                        + "GROUP BY subtype ORDER BY n DESC LIMIT ?", type, limit)
-                : counts("SELECT subtype, COUNT(*) AS n FROM events WHERE type = ? AND player_uuid = ? "
-                        + "GROUP BY subtype ORDER BY n DESC LIMIT ?", type, player, limit);
+        return counts("SELECT subtype, COUNT(*) AS n FROM events WHERE type = ? AND player_uuid = ? "
+                + "GROUP BY subtype ORDER BY n DESC LIMIT ?", type, player, limit);
+    }
+
+    /** Meest voorkomende subtypes van een type, voor alle spelers binnen het filter. */
+    private List<CountEntry> topSubtypes(String type, PlayerFilter filter, int limit) throws SQLException {
+        return counts("SELECT subtype, COUNT(*) AS n FROM events WHERE type = ?" + filter.and("player_uuid")
+                + " GROUP BY subtype ORDER BY n DESC LIMIT ?", type, limit);
     }
 
     /** Als {@link #topSubtypes}, maar telt {@code value} op (aantal items, levenspunten) in plaats van rijen. */
@@ -517,7 +529,8 @@ public final class SqliteDataStore implements DataStore {
             while (rs.next()) {
                 result.add(new PlayerSummary(rs.getString(1), rs.getString(2),
                         rs.getLong(3), rs.getLong(4), rs.getLong(5), rs.getLong(6), rs.getLong(7),
-                        rs.getLong(8), rs.getLong(9), rs.getLong(10), rs.getLong(11)));
+                        rs.getLong(8), rs.getLong(9), rs.getLong(10), rs.getLong(11),
+                        PlayerFilter.isBot(UUID.fromString(rs.getString(1)))));
             }
         }
         return result;

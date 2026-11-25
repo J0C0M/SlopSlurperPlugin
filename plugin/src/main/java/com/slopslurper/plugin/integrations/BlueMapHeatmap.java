@@ -2,6 +2,7 @@ package com.slopslurper.plugin.integrations;
 
 import com.flowpowered.math.vector.Vector3d;
 import com.slopslurper.plugin.storage.DataStore;
+import com.slopslurper.plugin.storage.PlayerFilter;
 import com.slopslurper.plugin.storage.stats.ChunkHeat;
 import de.bluecolored.bluemap.api.BlueMapAPI;
 import de.bluecolored.bluemap.api.BlueMapMap;
@@ -71,22 +72,28 @@ public final class BlueMapHeatmap {
     }
 
     private void refresh(BlueMapAPI api) {
+        // Twee lagen, zodat bots de kaart van echte spelers niet vervuilen
+        refresh(api, PlayerFilter.REAL, MARKER_SET_ID, "SlopSlurper: gebroken blokken", false);
+        refresh(api, PlayerFilter.BOTS, MARKER_SET_ID + "-bots", "SlopSlurper: gebroken blokken (bots)", true);
+    }
+
+    private void refresh(BlueMapAPI api, PlayerFilter filter, String setId, String label, boolean hidden) {
         try {
-            List<ChunkHeat> cells = store.getBlockBreakHeatmap(null).get();
+            List<ChunkHeat> cells = store.getBlockBreakHeatmap(null, filter).get();
             long max = cells.stream().mapToLong(ChunkHeat::count).max().orElse(1);
 
             // Groepeer per wereld en zet de markers op alle BlueMap-kaarten van die wereld
             Map<String, MarkerSet> setsPerWorld = new HashMap<>();
             for (ChunkHeat cell : cells) {
-                MarkerSet set = setsPerWorld.computeIfAbsent(cell.world(), w -> newMarkerSet());
+                MarkerSet set = setsPerWorld.computeIfAbsent(cell.world(), w -> newMarkerSet(label, hidden));
                 set.getMarkers().put(cell.world() + "_" + cell.chunkX() + "_" + cell.chunkZ(), toMarker(cell, max));
             }
 
             for (World world : Bukkit.getWorlds()) {
-                MarkerSet set = setsPerWorld.getOrDefault(world.getName(), newMarkerSet());
+                MarkerSet set = setsPerWorld.getOrDefault(world.getName(), newMarkerSet(label, hidden));
                 api.getWorld(world).ifPresent(bmWorld -> {
                     for (BlueMapMap map : bmWorld.getMaps()) {
-                        map.getMarkerSets().put(MARKER_SET_ID, set);
+                        map.getMarkerSets().put(setId, set);
                     }
                 });
             }
@@ -95,11 +102,11 @@ public final class BlueMapHeatmap {
         }
     }
 
-    private static MarkerSet newMarkerSet() {
+    private static MarkerSet newMarkerSet(String label, boolean hidden) {
         return MarkerSet.builder()
-                .label("SlopSlurper: gebroken blokken")
+                .label(label)
                 .toggleable(true)
-                .defaultHidden(false)
+                .defaultHidden(hidden)
                 .build();
     }
 

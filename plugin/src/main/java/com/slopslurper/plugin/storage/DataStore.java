@@ -45,10 +45,10 @@ public interface DataStore {
     CompletableFuture<BlockStats> getBlockStats(UUID player, int limit);
 
     /** Server-breed overzicht: totalen, top-blokken en meest actieve spelers. */
-    CompletableFuture<Overview> getOverview(int limit);
+    CompletableFuture<Overview> getOverview(int limit, PlayerFilter filter);
 
     /** Alle spelers waarvan data bestaat, meest actief eerst. */
-    CompletableFuture<List<PlayerSummary>> getPlayers();
+    CompletableFuture<List<PlayerSummary>> getPlayers(PlayerFilter filter);
 
     /**
      * Details van één speler.
@@ -60,15 +60,15 @@ public interface DataStore {
     /**
      * Gebroken blokken per chunk, voor de heatmap.
      *
-     * @param player alleen deze speler, of {@code null} voor iedereen
+     * @param player alleen deze speler, of {@code null} voor iedereen binnen {@code filter}
      */
-    CompletableFuture<List<ChunkHeat>> getBlockBreakHeatmap(UUID player);
+    CompletableFuture<List<ChunkHeat>> getBlockBreakHeatmap(UUID player, PlayerFilter filter);
 
     /**
      * Doorgebrachte tijd per chunk, uit de positie-samples.
      *
-     * @param player alleen deze speler, of {@code null} voor iedereen
+     * @param player alleen deze speler, of {@code null} voor iedereen binnen {@code filter}
      * @param world  alleen deze wereld, of {@code null} voor alle werelden
      */
-    CompletableFuture<List<PositionHeat>> getPositionHeatmap(UUID player, String world);
+    CompletableFuture<List<PositionHeat>> getPositionHeatmap(UUID player, String world, PlayerFilter filter);
 }

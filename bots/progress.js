@@ -182,6 +182,7 @@ module.exports = function install (PlayerBot, { withTimeout, isProtected, debug,
         if (this.state.milestones[goal] || !this.goalDone(goal)) continue
         this.state.milestones[goal] = new Date().toISOString()
         this.log(`mijlpaal: ${goal}`)
+        this.stats.milestone(goal)
         this.saveState()
       }
     },
