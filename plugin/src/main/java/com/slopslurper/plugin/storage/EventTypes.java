@@ -62,6 +62,12 @@ public final class EventTypes {
     /** Gebrouwen drankjes, op naam van wie de stand het laatst opende. subtype = drankje, item = soort fles, value = aantal, meta.ingredient. */
     public static final String BREW = "brew";
 
+    /** Opgeteld gebruik van blokken met rechtsklik. subtype = bloktype, value = aantal keer. */
+    public static final String INTERACT = "interact";
+
+    /** Speler gaat slapen. subtype = soort bed, plek = bed. */
+    public static final String SLEEP = "sleep";
+
     /** Speler komt online. meta.session = sessie-id. */
     public static final String SESSION_START = "session_start";
 
