@@ -49,6 +49,21 @@ trackers:
   # Smelten, enchanten, aambeeld en brouwen.
   stations:
     enabled: true
+  # Gebruikte blokken (deuren, knoppen, werkbanken, redstone) en slapen.
+  interactions:
+    enabled: true
+    # Zo vaak wordt het opgetelde totaal opgeslagen.
+    flush-seconds: 60
+  # Opgepakte, weggegooide en kapotte items.
+  items:
+    enabled: true
+    # Zo vaak wordt het opgetelde totaal opgeslagen.
+    flush-seconds: 60
+  # XP per bron, levels en advancements.
+  progress:
+    enabled: true
+    # Zo vaak wordt het opgetelde totaal opgeslagen.
+    flush-seconds: 60
   # Elke paar seconden per speler: wereld, positie, biome, ondergronds, voertuig
   # en wie er in de buurt is. Basis voor "waar besteden spelers hun tijd".
   positions:

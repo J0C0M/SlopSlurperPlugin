@@ -37,9 +37,13 @@ public final class BlueMapHeatmap {
     private final JavaPlugin plugin;
     private final DataStore store;
     private final Consumer<BlueMapAPI> onEnable = this::onBlueMapEnable;
-    private final Consumer<BlueMapAPI> onDisable = api -> stopTask();
+    private final Consumer<BlueMapAPI> onDisable = api -> {
+        stopTask();
+        mapIds = Map.of();
+    };
 
     private BukkitTask task;
+    private volatile Map<String, String> mapIds = Map.of();
 
     public BlueMapHeatmap(JavaPlugin plugin, DataStore store) {
         this.plugin = plugin;
@@ -71,7 +75,22 @@ public final class BlueMapHeatmap {
         }
     }
 
+    /** Per wereldnaam het id van de (eerste) BlueMap-kaart. Leeg zolang BlueMap niet klaar is. */
+    public Map<String, String> mapIds() {
+        return mapIds;
+    }
+
+    private void updateMapIds(BlueMapAPI api) {
+        Map<String, String> ids = new HashMap<>();
+        for (World world : Bukkit.getWorlds()) {
+            api.getWorld(world).flatMap(w -> w.getMaps().stream().findFirst())
+                    .ifPresent(map -> ids.put(world.getName(), map.getId()));
+        }
+        mapIds = Map.copyOf(ids);
+    }
+
     private void refresh(BlueMapAPI api) {
+        updateMapIds(api);
         // Twee lagen, zodat bots de kaart van echte spelers niet vervuilen
         refresh(api, PlayerFilter.REAL, MARKER_SET_ID, "SlopSlurper: gebroken blokken", false);
         refresh(api, PlayerFilter.BOTS, MARKER_SET_ID + "-bots", "SlopSlurper: gebroken blokken (bots)", true);

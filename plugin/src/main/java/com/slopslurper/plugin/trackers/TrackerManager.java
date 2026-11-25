@@ -30,6 +30,9 @@ public final class TrackerManager {
             HealthTracker::new,
             CraftTracker::new,
             StationTracker::new,
+            InteractionTracker::new,
+            ItemTracker::new,
+            ProgressTracker::new,
             PositionTracker::new
     );
 
