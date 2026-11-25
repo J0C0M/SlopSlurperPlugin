@@ -36,6 +36,17 @@ final class ResultSlots {
         };
     }
 
+    /** Hoeveel items deze klik van een gewone resultaatstapel (oven) pakt: de stapel kan deels achterblijven. */
+    static int itemsTaken(InventoryClickEvent event, ItemStack result) {
+        int amount = result.getAmount();
+        return switch (event.getClick()) {
+            case SHIFT_LEFT, SHIFT_RIGHT -> Math.min(amount, space(event.getWhoClicked().getInventory(), result));
+            case RIGHT -> isEmpty(event.getCursor()) ? (amount + 1) / 2 : amount * timesTaken(event, result, 1);
+            case DROP -> isEmpty(event.getCursor()) ? 1 : 0;
+            default -> amount * timesTaken(event, result, 1);
+        };
+    }
+
     private static int space(PlayerInventory inventory, ItemStack result) {
         int space = 0;
         for (ItemStack slot : inventory.getStorageContents()) {

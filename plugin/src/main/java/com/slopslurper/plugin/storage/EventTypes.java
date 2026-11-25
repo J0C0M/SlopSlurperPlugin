@@ -50,6 +50,18 @@ public final class EventTypes {
     /** Speler craft iets. subtype = item, value = aantal, meta.grid = table of inventory. */
     public static final String CRAFT = "craft";
 
+    /** Speler haalt iets uit een oven. subtype = item, value = aantal, meta.station. */
+    public static final String SMELT = "smelt";
+
+    /** Enchanten aan de tafel. subtype = item, meta: enchants ("sharpness:3,..."), levels (betaald), required_level. */
+    public static final String ENCHANT = "enchant";
+
+    /** Aambeeld. subtype = RENAME, REPAIR, COMBINE of ENCHANT (boek), item = resultaat, meta: levels, renamed. */
+    public static final String ANVIL = "anvil";
+
+    /** Gebrouwen drankjes, op naam van wie de stand het laatst opende. subtype = drankje, item = soort fles, value = aantal, meta.ingredient. */
+    public static final String BREW = "brew";
+
     /** Speler komt online. meta.session = sessie-id. */
     public static final String SESSION_START = "session_start";
 

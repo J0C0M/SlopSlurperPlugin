@@ -46,6 +46,9 @@ trackers:
   # Gecrafte items met aantal, aan een werkbank of in de inventory.
   crafting:
     enabled: true
+  # Smelten, enchanten, aambeeld en brouwen.
+  stations:
+    enabled: true
   # Elke paar seconden per speler: wereld, positie, biome, ondergronds, voertuig
   # en wie er in de buurt is. Basis voor "waar besteden spelers hun tijd".
   positions:

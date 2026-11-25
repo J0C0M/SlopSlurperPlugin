@@ -86,8 +86,13 @@ public record GameEvent(
         }
 
         public Builder player(Player player) {
-            this.playerUuid = player.getUniqueId();
-            this.playerName = player.getName();
+            return player(player.getUniqueId(), player.getName());
+        }
+
+        /** Voor een speler die misschien niet meer online is. */
+        public Builder player(UUID uuid, String name) {
+            this.playerUuid = uuid;
+            this.playerName = name;
             return this;
         }
 

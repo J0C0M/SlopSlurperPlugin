@@ -29,6 +29,7 @@ public final class TrackerManager {
             FishTracker::new,
             HealthTracker::new,
             CraftTracker::new,
+            StationTracker::new,
             PositionTracker::new
     );
 
