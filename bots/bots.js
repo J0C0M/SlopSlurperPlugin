@@ -20,6 +20,7 @@ const mineflayer = require('mineflayer')
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder')
 const { Vec3 } = require('vec3')
 const { Schedule, SCHEDULE_NAMES, formatTime } = require('./schedule')
+const { RunReport } = require('./report')
 
 // ---------- instellingen ----------
 
@@ -64,6 +65,8 @@ function parseArgs (argv) {
 
 const opts = parseArgs(process.argv.slice(2))
 const STATE_DIR = path.join(__dirname, 'state')
+const REPORT_EVERY_MS = 5 * 60_000 // tussenstand, zodat er na een crash ook een rapport is
+const report = new RunReport(process.argv.slice(2).join(' '))
 
 // Elke bot krijgt een eigen speelstijl, zodat de data per speler verschilt.
 const PERSONALITIES = {
@@ -225,6 +228,7 @@ class PlayerBot {
     this.deathSpot = null
     this.skipBlocks = new Map() // onbereikbare blokken, tot wanneer overslaan
     this.state = this.loadState()
+    this.stats = report.add(name, personality, Object.keys(this.state.milestones || {}))
   }
 
   log (...args) {
@@ -324,6 +328,7 @@ class PlayerBot {
       this.stuckLog = []
       this.forcedMoves = []
       bot.loadPlugin(pathfinder)
+      this.stats.attach(bot)
       // De server zet de bot terug (teleport). Gebeurt dat tientallen keren achter elkaar, dan
       // keurt de server zijn bewegingen af en komt hij niet meer vooruit.
       bot.on('forcedMove', () => {
@@ -367,8 +372,10 @@ class PlayerBot {
       bot.on('kicked', (reason) => {
         const text = typeof reason === 'string' ? reason : JSON.stringify(reason)
         this.log('gekickt:', text)
+        this.stats.kicks.push(text)
       })
       bot.on('error', (err) => {
+        this.stats.error(err.code || err.message)
         if (err.code === 'ECONNREFUSED') this.log(`server niet bereikbaar op ${opts.host}:${opts.port}, later opnieuw`)
         else this.log('fout:', err.message)
         finish('error')
@@ -472,6 +479,7 @@ class PlayerBot {
       await withTimeout(bot.pathfinder.goto(goal), ms, () => bot.pathfinder.setGoal(null))
     } catch (err) {
       if (stuck) {
+        this.stats.stuck++
         await this.unstuck(goal)
         this.checkRejoin()
         throw new Timeout('vast komen te zitten')
@@ -496,6 +504,7 @@ class PlayerBot {
     if (sameSpot.length >= 3 || this.forcedMoves.length > 30) {
       this.log('zit vast, logt opnieuw in')
       this.rejoinRequested = true
+      this.stats.rejoins++
       bot.quit()
     }
   }
@@ -1183,13 +1192,19 @@ async function main () {
     console.log(`  ${b.name.padEnd(16)} ${b.personality.padEnd(9)} ${(!opts.schedule ? '' : b.schedule.label).padEnd(14)} ${when}; vrienden: ${friends}${home}`)
   }
 
+  let stopping = false
   const shutdown = () => {
+    if (stopping) return
+    stopping = true
     console.log('Bots uitloggen...')
+    console.log(`\n${report.save(true)}\nOpgeslagen in ${report.file}`)
     for (const b of ALL_BOTS) if (b.bot) b.bot.quit()
     setTimeout(() => process.exit(0), 1500)
   }
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
+  process.on('SIGHUP', shutdown) // venster gesloten
+  setInterval(() => { if (!stopping) report.save(false) }, REPORT_EVERY_MS)
 
   for (const b of ALL_BOTS) b.lifecycle()
 }

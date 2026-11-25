@@ -3,6 +3,7 @@ package com.slopslurper.plugin.web;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.slopslurper.plugin.storage.DataStore;
+import com.slopslurper.plugin.storage.PlayerFilter;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 
@@ -38,6 +39,7 @@ import java.util.logging.Logger;
  *   GET /api/stats[?player=uuid&days=N] sessies, doden, gevecht, items en beweging (speler of hele server)
  *   GET /api/map?world=naam        instellingen van de platte kaart (404 als die er niet is)
  *   GET /api/map/tile?world=naam&lod=1&x=0&z=0  één kaarttegel als PNG
+ *   De overzichten, heatmaps en stats accepteren ?players=all|real|bots (standaard all)
  *   GET /api/config                instellingen voor de frontend (bijv. of de 3D-kaart beschikbaar is)
  */
 public final class WebServer {
@@ -112,6 +114,14 @@ public final class WebServer {
                 path = path.substring(0, path.length() - 1);
             }
 
+            PlayerFilter filter;
+            try {
+                filter = PlayerFilter.parse(queryParam(exchange.getRequestURI(), "players"));
+            } catch (IllegalArgumentException e) {
+                sendJson(exchange, 400, Map.of("error", "Ongeldig filter, gebruik players=all, real of bots"));
+                return;
+            }
+
             if (path.equals("/api/config")) {
                 Map<String, Object> config = new java.util.HashMap<>();
                 config.put("blueMapEnabled", blueMapUrl != null);
@@ -132,17 +142,17 @@ public final class WebServer {
                 }
                 if (path.equals("/api/stats")) {
                     long since = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(parseDays(exchange.getRequestURI()));
-                    sendJson(exchange, 200, await(store.getStats(player, TOP_SIZE, since)));
+                    sendJson(exchange, 200, await(store.getStats(player, TOP_SIZE, since, filter)));
                 } else if (path.equals("/api/heatmap")) {
-                    sendJson(exchange, 200, await(store.getBlockBreakHeatmap(player)));
+                    sendJson(exchange, 200, await(store.getBlockBreakHeatmap(player, filter)));
                 } else {
                     String world = queryParam(exchange.getRequestURI(), "world");
-                    sendJson(exchange, 200, await(store.getPositionHeatmap(player, world)));
+                    sendJson(exchange, 200, await(store.getPositionHeatmap(player, world, filter)));
                 }
             } else if (path.equals("/api/overview")) {
-                sendJson(exchange, 200, await(store.getOverview(TOP_SIZE)));
+                sendJson(exchange, 200, await(store.getOverview(TOP_SIZE, filter)));
             } else if (path.equals("/api/players")) {
-                sendJson(exchange, 200, await(store.getPlayers()));
+                sendJson(exchange, 200, await(store.getPlayers(filter)));
             } else if (path.startsWith("/api/players/")) {
                 UUID uuid;
                 try {

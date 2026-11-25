@@ -10,6 +10,7 @@ package com.slopslurper.plugin.storage.stats;
  * @param playtimeMs  totale speeltijd over alle sessies (inclusief AFK)
  * @param afkMs       waarvan AFK
  * @param sessions    aantal sessies
+ * @param bot         of dit een testbot is (geen Minecraft-account, zie PlayerFilter)
  */
 public record PlayerSummary(
         String uuid,
@@ -22,6 +23,7 @@ public record PlayerSummary(
         long lastActive,
         long playtimeMs,
         long afkMs,
-        long sessions
+        long sessions,
+        boolean bot
 ) {
 }
