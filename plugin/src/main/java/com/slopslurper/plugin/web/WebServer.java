@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.UUID;
@@ -33,6 +34,7 @@ import java.util.logging.Logger;
  *   GET /api/players               alle spelers met hun totaal
  *   GET /api/players/{uuid}?days=N details van één speler (activiteit van de laatste N dagen)
  *   GET /api/heatmap[?player=uuid] gebroken blokken per chunk
+ *   GET /api/heatmap/positions[?player=uuid&world=naam] doorgebrachte tijd per chunk
  *   GET /api/config                instellingen voor de frontend (bijv. of de 3D-kaart beschikbaar is)
  */
 public final class WebServer {
@@ -110,18 +112,23 @@ public final class WebServer {
                 config.put("blueMapEnabled", blueMapUrl != null);
                 config.put("blueMapUrl", blueMapUrl);
                 sendJson(exchange, 200, config);
-            } else if (path.equals("/api/heatmap")) {
+            } else if (path.equals("/api/heatmap") || path.equals("/api/heatmap/positions")) {
                 UUID player = null;
-                String q = exchange.getRequestURI().getQuery();
-                if (q != null && q.startsWith("player=")) {
+                String playerParam = queryParam(exchange.getRequestURI(), "player");
+                if (playerParam != null) {
                     try {
-                        player = UUID.fromString(q.substring("player=".length()));
+                        player = UUID.fromString(playerParam);
                     } catch (IllegalArgumentException e) {
                         sendJson(exchange, 400, Map.of("error", "Ongeldige UUID"));
                         return;
                     }
                 }
-                sendJson(exchange, 200, await(store.getBlockBreakHeatmap(player)));
+                if (path.equals("/api/heatmap")) {
+                    sendJson(exchange, 200, await(store.getBlockBreakHeatmap(player)));
+                } else {
+                    String world = queryParam(exchange.getRequestURI(), "world");
+                    sendJson(exchange, 200, await(store.getPositionHeatmap(player, world)));
+                }
             } else if (path.equals("/api/overview")) {
                 sendJson(exchange, 200, await(store.getOverview(TOP_SIZE)));
             } else if (path.equals("/api/players")) {
@@ -170,6 +177,21 @@ public final class WebServer {
                 sendText(exchange, 200, contentType(file), in.readAllBytes());
             }
         }
+    }
+
+    /** Waarde van een queryparameter, of {@code null} als die ontbreekt of leeg is. */
+    private static String queryParam(URI uri, String key) {
+        String q = uri.getRawQuery();
+        if (q == null) {
+            return null;
+        }
+        for (String part : q.split("&")) {
+            if (part.startsWith(key + "=")) {
+                String value = URLDecoder.decode(part.substring(key.length() + 1), StandardCharsets.UTF_8);
+                return value.isEmpty() ? null : value;
+            }
+        }
+        return null;
     }
 
     private static int parseDays(URI uri) {

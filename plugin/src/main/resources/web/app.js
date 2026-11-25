@@ -410,7 +410,7 @@
     }
 
     /** Uit de positie-samples: werelden, biomen, ondergronds, voertuigen en met wie. */
-    function placeBlocks({ places }) {
+    function placeBlocks({ player, places }) {
         if (!places || !places.sampledMs) {
             return [{ title: "Waar speelt deze speler?", wide: true, content: h("p", { class: "muted" },
                 "Nog geen positie-data. Zolang de speler online is, wordt elke paar seconden vastgelegd waar hij is.") }];
@@ -430,6 +430,213 @@
             bars("Ondergronds of bovengronds", depth, asIs, duration),
             bars("Onderweg", places.vehicles, pretty, duration),
             companions,
+            { title: "Op de kaart", content: h("a", { href: `#/heatmap/world/${player.uuid}` }, "Bekijk de heatmap van deze speler →") },
+        ];
+    }
+
+    // ---------- Heatmap: waar spelers hun tijd doorbrengen ----------
+
+    const HEAT_ROUTE = /^#\/heatmap(?:\/([^/]+))?(?:\/([0-9a-fA-F-]{36}))?$/;
+    const HEAT_STOPS = [[0, 80, 255], [0, 220, 120], [255, 230, 0], [255, 40, 20]]; // zelfde als op de 3D-kaart
+    const CHUNK = 16;
+
+    /** Ververst de getoonde heatmap zonder zoom, positie of keuzes kwijt te raken. */
+    let refreshHeatmap = null;
+
+    function heatColor(t) {
+        const scaled = Math.max(0, Math.min(1, t)) * (HEAT_STOPS.length - 1);
+        const i = Math.min(Math.floor(scaled), HEAT_STOPS.length - 2);
+        const c = HEAT_STOPS[i].map((v, k) => Math.round(v + (HEAT_STOPS[i + 1][k] - v) * (scaled - i)));
+        return `rgb(${c.join(",")})`;
+    }
+
+    /** Korte tijden zijn hier normaal, dus preciezer dan duration(): 40_000 -> "40 s" */
+    const shortTime = ms => ms < 60_000 ? `${Math.round(ms / 1000)} s` : duration(ms);
+
+    const chunkLabel = c => `x ${c.chunkX * CHUNK}, z ${c.chunkZ * CHUNK}`;
+
+    async function renderHeatmap(worldParam, playerParam) {
+        let world = worldParam ? decodeURIComponent(worldParam) : "world";
+        let player = playerParam ?? "";
+        let cells = []; // alle werelden van de gekozen speler
+        let shown = [];
+        let view = null; // midden (in blokken) en scale (pixels per blok)
+        let drag = null;
+
+        const worldSelect = h("select", { onchange: () => { world = worldSelect.value; choose(); } });
+        const playerSelect = h("select", { onchange: () => { player = playerSelect.value; choose(); } });
+        const canvas = h("canvas", { class: "heat-canvas", role: "img" });
+        const tip = h("div", { class: "heat-tip", hidden: "" });
+        const none = h("div", { class: "heat-none", hidden: "" }, "Nog geen posities voor deze keuze.");
+        const top = h("div");
+        const ctx = canvas.getContext("2d");
+        const zoomButton = (label, text, action) =>
+            h("button", { type: "button", "aria-label": label, title: label, onclick: action }, text);
+
+        function choose() {
+            history.replaceState(null, "", `#/heatmap/${encodeURIComponent(world)}${player ? "/" + player : ""}`);
+            view = null;
+            load().catch(showOffline);
+        }
+
+        function showOffline() {
+            status.textContent = "Server niet bereikbaar";
+            status.classList.add("error");
+        }
+
+        function fillSelect(select, options, value) {
+            select.replaceChildren(...options.map(([v, label]) => h("option", { value: v }, label)));
+            select.value = value;
+        }
+
+        async function load() {
+            const forPlayer = player;
+            const [players, data] = await Promise.all([api("/api/players"),
+                api("/api/heatmap/positions" + (player ? `?player=${player}` : ""))]);
+            if (forPlayer !== player) return; // inmiddels een andere speler gekozen
+            cells = data || [];
+            const worlds = new Set(["world", "world_nether", "world_the_end", world, ...cells.map(c => c.world)]);
+            if (document.activeElement !== worldSelect) fillSelect(worldSelect, [...worlds].map(w => [w, prettyWorld(w)]), world);
+            if (document.activeElement !== playerSelect) {
+                fillSelect(playerSelect, [["", "Iedereen"], ...(players || []).map(p => [p.uuid, p.name])], player);
+            }
+            shown = cells.filter(c => c.world === world).sort((a, b) => a.timeMs - b.timeMs);
+            none.hidden = shown.length > 0;
+            const best = shown.slice(-10).reverse();
+            top.replaceChildren(barList(best.map(c => ({ key: chunkLabel(c), amount: c.timeMs })), asIs, shortTime));
+            canvas.setAttribute("aria-label", best.length
+                ? `Heatmap van ${prettyWorld(world)}: ${shown.length} chunks bezocht, het langst bij ${chunkLabel(best[0])}.`
+                : "Heatmap zonder data.");
+            draw();
+            status.textContent = `Bijgewerkt om ${new Date().toLocaleTimeString("nl-NL")}`;
+            status.classList.remove("error");
+        }
+
+        /** Zoomt zo dat alle bezochte chunks passen, met wat ruimte eromheen. */
+        function fit() {
+            if (!shown.length) return { x: 0, z: 0, scale: 2 };
+            const xs = shown.map(c => c.chunkX), zs = shown.map(c => c.chunkZ);
+            const min = (a) => a.reduce((m, v) => Math.min(m, v)), max = (a) => a.reduce((m, v) => Math.max(m, v));
+            const x0 = min(xs) * CHUNK, x1 = (max(xs) + 1) * CHUNK, z0 = min(zs) * CHUNK, z1 = (max(zs) + 1) * CHUNK;
+            return {
+                x: (x0 + x1) / 2, z: (z0 + z1) / 2,
+                scale: Math.min(4, canvas.clientWidth / (x1 - x0 + 2 * CHUNK), canvas.clientHeight / (z1 - z0 + 2 * CHUNK)),
+            };
+        }
+
+        const toScreen = (x, z) => [(x - view.x) * view.scale + canvas.clientWidth / 2, (z - view.z) * view.scale + canvas.clientHeight / 2];
+        const toWorld = (px, py) => [(px - canvas.clientWidth / 2) / view.scale + view.x, (py - canvas.clientHeight / 2) / view.scale + view.z];
+
+        function draw() {
+            const width = canvas.clientWidth, height = canvas.clientHeight, dpr = window.devicePixelRatio || 1;
+            if (!width || !height) return; // nog niet op de pagina
+            view ??= fit();
+            canvas.width = Math.round(width * dpr);
+            canvas.height = Math.round(height * dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            const css = getComputedStyle(canvas);
+
+            // Logaritmisch: anders zie je naast één drukke plek niks meer
+            const max = Math.log1p((shown.at(-1)?.timeMs ?? 0) / 1000) || 1;
+            const size = Math.max(CHUNK * view.scale, 2); // ver uitgezoomd nog steeds zichtbaar
+            for (const c of shown) {
+                const [px, py] = toScreen(c.chunkX * CHUNK, c.chunkZ * CHUNK);
+                if (px + size < 0 || py + size < 0 || px > width || py > height) continue;
+                ctx.fillStyle = heatColor(Math.log1p(c.timeMs / 1000) / max);
+                ctx.fillRect(px, py, size, size);
+            }
+
+            // Rasterlijnen op een rond aantal blokken, minstens 80 px uit elkaar
+            let step = CHUNK;
+            while (step * view.scale < 80) step *= 2;
+            ctx.font = `11px ${css.fontFamily}`;
+            ctx.lineWidth = 1;
+            const [left, upper] = toWorld(0, 0);
+            const line = (zero, x1, y1, x2, y2) => {
+                ctx.strokeStyle = css.getPropertyValue(zero ? "--muted" : "--border");
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.stroke();
+            };
+            const text = (label, x, y) => {
+                ctx.lineWidth = 3;
+                ctx.strokeStyle = css.getPropertyValue("--surface");
+                ctx.strokeText(label, x, y);
+                ctx.lineWidth = 1;
+                ctx.fillStyle = css.getPropertyValue("--muted");
+                ctx.fillText(label, x, y);
+            };
+            for (let x = Math.ceil(left / step) * step; toScreen(x, 0)[0] < width; x += step) {
+                const px = Math.round(toScreen(x, 0)[0]) + .5;
+                line(x === 0, px, 0, px, height);
+                text(`x ${x}`, px + 4, 13);
+            }
+            for (let z = Math.ceil(upper / step) * step; toScreen(0, z)[1] < height; z += step) {
+                const py = Math.round(toScreen(0, z)[1]) + .5;
+                line(z === 0, 0, py, width, py);
+                if (py > 30) text(`z ${z}`, 4, py - 4);
+            }
+        }
+
+        function zoom(factor, px = canvas.clientWidth / 2, py = canvas.clientHeight / 2) {
+            if (!view) return;
+            const [x, z] = toWorld(px, py);
+            view.scale = Math.max(0.005, Math.min(16, view.scale * factor));
+            const [x2, z2] = toWorld(px, py);
+            view.x += x - x2; // de plek onder de muis blijft staan
+            view.z += z - z2;
+            draw();
+        }
+
+        canvas.addEventListener("wheel", e => {
+            e.preventDefault();
+            zoom(Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)), e.offsetX, e.offsetY);
+        }, { passive: false });
+        canvas.addEventListener("pointerdown", e => {
+            if (!view) return;
+            drag = { px: e.clientX, py: e.clientY, x: view.x, z: view.z };
+            canvas.setPointerCapture(e.pointerId);
+        });
+        canvas.addEventListener("pointermove", e => {
+            if (!view) return;
+            if (drag) {
+                view.x = drag.x - (e.clientX - drag.px) / view.scale;
+                view.z = drag.z - (e.clientY - drag.py) / view.scale;
+                draw();
+            }
+            const [x, z] = toWorld(e.offsetX, e.offsetY);
+            const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
+            const cell = shown.find(c => c.chunkX === cx && c.chunkZ === cz);
+            tip.hidden = !cell || !!drag;
+            if (cell) {
+                tip.textContent = `${chunkLabel(cell)} · ${shortTime(cell.timeMs)}`;
+                tip.style.left = `${Math.min(e.offsetX + 14, canvas.clientWidth - 170)}px`;
+                tip.style.top = `${Math.max(e.offsetY - 34, 4)}px`;
+            }
+        });
+        for (const type of ["pointerup", "pointercancel"]) canvas.addEventListener(type, () => { drag = null; });
+        canvas.addEventListener("pointerleave", () => { tip.hidden = true; });
+        new ResizeObserver(draw).observe(canvas);
+
+        await load();
+        if (HEAT_ROUTE.test(location.hash)) refreshHeatmap = () => load().catch(showOffline); // niet als je al weg bent
+
+        return [
+            h("div", { class: "map-head" },
+                h("div", {},
+                    h("h1", {}, "Heatmap"),
+                    h("p", { class: "subtitle" }, "Waar spelers hun tijd doorbrengen, per chunk (16×16 blokken). Noord is boven.")),
+                h("div", { class: "legend" }, "kort", h("span", { class: "legend-bar", "aria-hidden": "true" }), "lang")),
+            h("div", { class: "heat-controls" },
+                h("label", {}, "Wereld ", worldSelect),
+                h("label", {}, "Speler ", playerSelect),
+                h("div", { class: "heat-zoom" },
+                    zoomButton("Uitzoomen", "−", () => zoom(1 / 1.5)),
+                    zoomButton("Inzoomen", "+", () => zoom(1.5)),
+                    zoomButton("Alles tonen", "Alles tonen", () => { view = null; draw(); }))),
+            h("div", { class: "heat-map" }, canvas, tip, none),
+            h("div", { class: "grid" }, card("Drukste plekken", top, true)),
         ];
     }
 
@@ -473,7 +680,7 @@
     const isMapRoute = () => location.hash === "#/kaart";
 
     function updateNav() {
-        const active = isMapRoute() ? "map" : "overview";
+        const active = isMapRoute() ? "map" : HEAT_ROUTE.test(location.hash) ? "heatmap" : "overview";
         document.querySelectorAll("[data-nav]").forEach(a => {
             a.classList.toggle("active", a.dataset.nav === active);
             if (a.dataset.nav === active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
@@ -486,8 +693,11 @@
         const id = ++renderId;
         updateNav();
         const match = location.hash.match(PLAYER_ROUTE);
+        const heat = location.hash.match(HEAT_ROUTE);
+        refreshHeatmap = null;
         try {
             const content = isMapRoute() ? await renderMap()
+                : heat ? await renderHeatmap(heat[1], heat[2])
                 : match ? await renderPlayer(match[1], match[2], useCache) : await renderOverview();
             if (id !== renderId) return; // inmiddels naar een andere pagina genavigeerd
             const focusedTab = document.activeElement?.dataset?.tab; // toetsenbordfocus niet kwijtraken
@@ -518,6 +728,9 @@
         render();
     });
     // De 3D-kaart niet automatisch verversen: dan zou het iframe steeds opnieuw laden
-    setInterval(() => { if (!document.hidden && !isMapRoute()) render(); }, REFRESH_MS);
+    setInterval(() => {
+        if (document.hidden || isMapRoute()) return;
+        if (refreshHeatmap) refreshHeatmap(); else render();
+    }, REFRESH_MS);
     render();
 })();

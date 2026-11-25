@@ -85,6 +85,7 @@ De plugin slaat spelersdata op in `run/plugins/SlopSlurperPlugin/data.db` (SQLit
 - **Dashboard:** zodra de server draait, open je **http://localhost:8080/**.
   - **Overzicht:** alle spelers met speeltijd, gebroken en geplaatste blokken, kills en doden, plus de meest gebroken en geplaatste blokken, de meest gedode mobs en de doodsoorzaken.
   - **Per speler:** verdeeld over de tabbladen Activiteit, Blokken, Gevecht, Items en Locaties: speeltijd en AFK, de laatste sessies, activiteit per dag en per uur, blokken, gereedschap, gedode mobs en spelers, doodsoorzaken, schade, genezing, eten, crafting, smelten, enchanten, aambeeld, brouwen, en uit de posities: tijd per wereld en biome, ondergronds of bovengronds, tijd in voertuigen en met wie de speler het meest speelt.
+  - **Heatmap:** waar spelers hun tijd doorbrengen, per wereld en voor iedereen of één speler. Je kunt zoomen (scrollen of knoppen) en slepen.
   - De pagina ververst elke 10 seconden.
 
 Het dashboard is standaard alleen bereikbaar vanaf je eigen pc. De poort en het adres stel je in via `run/plugins/SlopSlurperPlugin/config.yml`.
@@ -112,6 +113,7 @@ Het dashboard haalt alles uit een JSON-API. Wil je later een andere frontend of 
 | `GET /api/players` | Alle spelers met hun totalen, speeltijd en laatst actief |
 | `GET /api/players/{uuid}?days=14` | Details van één speler, met activiteit per uur over de laatste N dagen en `places` (tijd per wereld, biome, voertuig en met wie, in ms), `health` (schade en genezing in levenspunten, eten) en `crafting` |
 | `GET /api/heatmap[?player={uuid}]` | Gebroken blokken per chunk (wereld, chunk x/z, aantal, min/max y) |
+| `GET /api/heatmap/positions[?player={uuid}&world={naam}]` | Doorgebrachte tijd per chunk (wereld, chunk x/z, tijd in ms), uit de positie-samples |
 | `GET /api/config` | Instellingen voor de frontend, bijvoorbeeld of de 3D-kaart beschikbaar is |
 
 ### Opbouw
