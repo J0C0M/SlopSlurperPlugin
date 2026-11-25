@@ -3,10 +3,12 @@
 #           .\start-server.ps1 -Reset     (run/ weggooien en opnieuw uit server-template/ halen)
 #           .\start-server.ps1 -NoBuild   (alleen starten, plugin niet opnieuw bouwen)
 #           .\start-server.ps1 -NoBlueMap (BlueMap 3D-kaart niet downloaden)
+#           .\start-server.ps1 -Bots      (offline mode, alleen vanaf deze pc, zodat bots/ kan inloggen)
 param(
     [switch]$Reset,
     [switch]$NoBuild,
     [switch]$NoBlueMap,
+    [switch]$Bots,
     [string]$Memory = "2G"
 )
 
@@ -129,6 +131,34 @@ if ($Reset -and (Test-Path $run)) {
 if (-not (Test-Path $run)) {
     Write-Host "run/ aanmaken vanuit server-template/..."
     Copy-Item -Recurse $template $run
+}
+
+# 3b. Botmodus. Bots hebben geen Minecraft-account, dus de server moet in offline mode.
+#     Offline mode betekent dat iedereen met elke naam kan inloggen (ook met die van een op),
+#     daarom luistert de server dan alleen op 127.0.0.1. Zonder -Bots wordt dat teruggezet.
+function Set-ServerProperty([string]$file, [string]$key, [string]$value) {
+    $lines = @(Get-Content $file)
+    $found = $false
+    $lines = $lines | ForEach-Object {
+        if ($_ -match "^$([regex]::Escape($key))=") { $found = $true; "$key=$value" } else { $_ }
+    }
+    if (-not $found) { $lines += "$key=$value" }
+    [IO.File]::WriteAllLines($file, [string[]]$lines)
+}
+$props = Join-Path $run "server.properties"
+$botMarker = Join-Path $run ".bots-mode"
+if ($Bots) {
+    Set-ServerProperty $props "online-mode" "false"
+    Set-ServerProperty $props "enforce-secure-profile" "false"
+    Set-ServerProperty $props "server-ip" "127.0.0.1"
+    New-Item -ItemType File -Force $botMarker | Out-Null
+    Write-Host "Botmodus: offline mode, alleen bereikbaar vanaf deze pc. Start de bots in een tweede venster met .\start-bots.ps1"
+} elseif (Test-Path $botMarker) {
+    Set-ServerProperty $props "online-mode" "true"
+    Set-ServerProperty $props "enforce-secure-profile" "true"
+    Set-ServerProperty $props "server-ip" ""
+    Remove-Item -Force $botMarker
+    Write-Host "Botmodus uit: server staat weer in online mode."
 }
 
 # 4. Nieuwste plugin-jar in de server zetten

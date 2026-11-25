@@ -4,6 +4,7 @@
 #           ./start-server.sh --reset    (run/ weggooien en opnieuw uit server-template/ halen)
 #           ./start-server.sh --no-build (alleen starten)
 #           ./start-server.sh --no-bluemap (BlueMap 3D-kaart niet downloaden)
+#           ./start-server.sh --bots     (offline mode, alleen vanaf deze pc, zodat bots/ kan inloggen)
 set -euo pipefail
 
 # BlueMap 5.16 is de laatste versie die Minecraft 1.21.11 ondersteunt
@@ -19,11 +20,13 @@ MEMORY="${MEMORY:-2G}"
 RESET=0
 BUILD=1
 BLUEMAP=1
+BOTS=0
 for arg in "$@"; do
   case "$arg" in
     --reset) RESET=1 ;;
     --no-build) BUILD=0 ;;
     --no-bluemap) BLUEMAP=0 ;;
+    --bots) BOTS=1 ;;
     *) echo "Onbekende optie: $arg"; exit 1 ;;
   esac
 done
@@ -131,6 +134,33 @@ fi
 if [ ! -d "$RUN" ]; then
   echo "run/ aanmaken vanuit server-template/..."
   cp -R "$TEMPLATE" "$RUN"
+fi
+
+# 3b. Botmodus. Bots hebben geen Minecraft-account, dus de server moet in offline mode.
+#     Offline mode betekent dat iedereen met elke naam kan inloggen (ook met die van een op),
+#     daarom luistert de server dan alleen op 127.0.0.1. Zonder --bots wordt dat teruggezet.
+set_prop() {
+  local file="$RUN/server.properties" tmp
+  tmp="$(mktemp)"
+  if grep -q "^$1=" "$file"; then
+    awk -v k="$1" -v v="$2" 'BEGIN { FS = OFS = "=" } $1 == k { print k "=" v; next } { print }' "$file" > "$tmp"
+  else
+    cat "$file" > "$tmp"; echo "$1=$2" >> "$tmp"
+  fi
+  cat "$tmp" > "$file"; rm -f "$tmp"
+}
+if [ "$BOTS" = 1 ]; then
+  set_prop online-mode false
+  set_prop enforce-secure-profile false
+  set_prop server-ip 127.0.0.1
+  touch "$RUN/.bots-mode"
+  echo "Botmodus: offline mode, alleen bereikbaar vanaf deze pc. Start de bots in een tweede terminal met ./start-bots.sh"
+elif [ -f "$RUN/.bots-mode" ]; then
+  set_prop online-mode true
+  set_prop enforce-secure-profile true
+  set_prop server-ip ""
+  rm -f "$RUN/.bots-mode"
+  echo "Botmodus uit: server staat weer in online mode."
 fi
 
 # 4. Plugin-jar kopiëren

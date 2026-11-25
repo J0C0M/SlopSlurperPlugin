@@ -1,0 +1,22 @@
+{
+  "name": "slopslurper-bots",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Testbots die op de lokale server spelen, zodat de trackers data verzamelen.",
+  "main": "bots.js",
+  "scripts": {
+    "start": "node bots.js",
+    "postinstall": "patch-package"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "mineflayer": "4.39.0",
+    "mineflayer-pathfinder": "2.4.5",
+    "vec3": "0.1.10"
+  },
+  "devDependencies": {
+    "patch-package": "8.0.0"
+  }
+}
