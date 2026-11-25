@@ -621,6 +621,95 @@
 
     const chunkLabel = c => `x ${c.chunkX * CHUNK}, z ${c.chunkZ * CHUNK}`;
 
+    const MAP_REFRESH_MS = 60_000;
+
+    /**
+     * Platte wereldkaart voor onder de heatmap, uit de "lowres"-tegels van BlueMap.
+     * onTile wordt aangeroepen als er een tegel klaar is om te tekenen.
+     */
+    function worldMap(world, onTile) {
+        const tiles = new Map(); // "lod/x/z" -> {image, loadedAt, loading}
+        let settings = null;
+
+        async function load() {
+            const json = await api(`/api/map?world=${encodeURIComponent(world)}`);
+            settings = json?.lowres ?? null;
+            return settings != null;
+        }
+
+        async function loadTile(key, lod, x, z) {
+            const entry = tiles.get(key) ?? { image: null };
+            tiles.set(key, entry);
+            entry.loading = true;
+            try {
+                const res = await fetch(`/api/map/tile?world=${encodeURIComponent(world)}&lod=${lod}&x=${x}&z=${z}`, { cache: "no-store" });
+                if (res.status === 200) entry.image = shadeTile(await createImageBitmap(await res.blob(),
+                    { premultiplyAlpha: "none", colorSpaceConversion: "none" }), lod);
+            } catch {
+                // geen tegel: dan blijft die plek leeg (of de oude tegel staan)
+            }
+            entry.loading = false;
+            entry.loadedAt = Date.now();
+            if (entry.image) onTile();
+        }
+
+        /** Bovenste helft is kleur, onderste helft hoogte. Hellingen krijgen schaduw, net als in BlueMap. */
+        function shadeTile(bitmap, lod) {
+            const [w, d] = settings.tileSize;
+            const full = w + 1; // één extra rij en kolom, van de buurtegel
+            const source = new OffscreenCanvas(bitmap.width, bitmap.height).getContext("2d", { willReadFrequently: true });
+            source.drawImage(bitmap, 0, 0);
+            const data = source.getImageData(0, 0, bitmap.width, bitmap.height).data;
+            const out = new OffscreenCanvas(w, d);
+            const target = out.getContext("2d");
+            const image = target.createImageData(w, d);
+            const height = (x, z) => {
+                const i = ((z + d + 1) * full + x) * 4;
+                const v = data[i + 1] * 256 + data[i + 2];
+                return v >= 32768 ? v - 65535 : v;
+            };
+            const lodScale = settings.lodFactor ** (lod - 1);
+            for (let z = 0; z < d; z++) {
+                for (let x = 0; x < w; x++) {
+                    const from = (z * full + x) * 4, to = (z * w + x) * 4;
+                    if (!data[from + 3]) continue;
+                    const here = height(x, z);
+                    const slope = ((here - height(x + 1, z)) + (here - height(x, z + 1))) / lodScale;
+                    const shade = Math.max(-0.2, Math.min(0.04, slope * 0.06)) * 255;
+                    for (let c = 0; c < 3; c++) image.data[to + c] = data[from + c] + shade;
+                    image.data[to + 3] = 255;
+                }
+            }
+            target.putImageData(image, 0, 0);
+            return out;
+        }
+
+        /** Tekent de zichtbare tegels; wat nog niet geladen of verouderd is, wordt opgehaald. */
+        function draw(ctx, width, height, scale, toScreen, toWorld) {
+            if (!settings) return;
+            const { tileSize: [w, d], lodFactor, lodCount } = settings;
+            let lod = 1; // het grofste niveau dat nog scherp is
+            while (lod < lodCount && lodFactor ** lod * scale <= 1.5) lod++;
+            const blocks = lodFactor ** (lod - 1);
+            const [x0, z0] = toWorld(0, 0), [x1, z1] = toWorld(width, height);
+            ctx.imageSmoothingEnabled = blocks * scale < 1;
+            for (let tz = Math.floor(z0 / (d * blocks)); tz * d * blocks < z1; tz++) {
+                for (let tx = Math.floor(x0 / (w * blocks)); tx * w * blocks < x1; tx++) {
+                    const key = `${lod}/${tx}/${tz}`;
+                    const entry = tiles.get(key);
+                    if (!entry || (!entry.loading && Date.now() - entry.loadedAt > MAP_REFRESH_MS)) loadTile(key, lod, tx, tz);
+                    if (!entry?.image) continue;
+                    // op hele pixels, anders zie je naden tussen de tegels
+                    const [px, py] = toScreen(tx * w * blocks, tz * d * blocks).map(Math.round);
+                    const [qx, qy] = toScreen((tx + 1) * w * blocks, (tz + 1) * d * blocks).map(Math.round);
+                    ctx.drawImage(entry.image, px, py, qx - px, qy - py);
+                }
+            }
+        }
+
+        return { world, load, draw, get ready() { return settings != null; } };
+    }
+
     async function renderHeatmap(worldParam, playerParam) {
         let world = worldParam ? decodeURIComponent(worldParam) : "world";
         let player = playerParam ?? "";
@@ -628,7 +717,12 @@
         let shown = [];
         let view = null; // midden (in blokken) en scale (pixels per blok)
         let drag = null;
+        let map = null; // platte kaart van de gekozen wereld
+        let showMap = true;
 
+        const mapToggle = h("input", { type: "checkbox", checked: "", onchange: () => { showMap = mapToggle.checked; draw(); } });
+        const mapHint = h("p", { class: "hint heat-hint", hidden: "" },
+            "Geen kaart van deze wereld. Die komt van BlueMap: controleer of de plugin draait en de wereld gerenderd is (zie README).");
         const worldSelect = h("select", { onchange: () => { world = worldSelect.value; choose(); } });
         const playerSelect = h("select", { onchange: () => { player = playerSelect.value; choose(); } });
         const canvas = h("canvas", { class: "heat-canvas", role: "img" });
@@ -655,7 +749,18 @@
             select.value = value;
         }
 
+        async function loadMap() {
+            if (map?.world !== world) map = worldMap(world, () => { if (canvas.isConnected) draw(); });
+            const current = map;
+            if (!current.ready) await current.load().catch(() => false); // BlueMap kan later klaar zijn: elke keer opnieuw proberen
+            if (current === map) {
+                mapHint.hidden = map.ready;
+                draw();
+            }
+        }
+
         async function load() {
+            loadMap(); // niet op wachten: de heatmap werkt ook zonder kaart
             const forPlayer = player;
             const [players, data] = await Promise.all([api("/api/players"),
                 api("/api/heatmap/positions" + (player ? `?player=${player}` : ""))]);
@@ -705,12 +810,17 @@
             // Logaritmisch: anders zie je naast één drukke plek niks meer
             const max = Math.log1p((shown.at(-1)?.timeMs ?? 0) / 1000) || 1;
             const size = Math.max(CHUNK * view.scale, 2); // ver uitgezoomd nog steeds zichtbaar
+            const withMap = showMap && map?.ready && map.world === world;
+            if (withMap) map.draw(ctx, width, height, view.scale, toScreen, toWorld);
+            ctx.globalAlpha = withMap ? 0.6 : 1; // de kaart blijft eronder zichtbaar
             for (const c of shown) {
                 const [px, py] = toScreen(c.chunkX * CHUNK, c.chunkZ * CHUNK);
                 if (px + size < 0 || py + size < 0 || px > width || py > height) continue;
                 ctx.fillStyle = heatColor(Math.log1p(c.timeMs / 1000) / max);
                 ctx.fillRect(px, py, size, size);
             }
+
+            ctx.globalAlpha = 1;
 
             // Rasterlijnen op een rond aantal blokken, minstens 80 px uit elkaar
             let step = CHUNK;
@@ -719,7 +829,7 @@
             ctx.lineWidth = 1;
             const [left, upper] = toWorld(0, 0);
             const line = (zero, x1, y1, x2, y2) => {
-                ctx.strokeStyle = css.getPropertyValue(zero ? "--muted" : "--border");
+                ctx.strokeStyle = withMap ? `rgba(255, 255, 255, ${zero ? .7 : .2})` : css.getPropertyValue(zero ? "--muted" : "--border");
                 ctx.beginPath();
                 ctx.moveTo(x1, y1);
                 ctx.lineTo(x2, y2);
@@ -730,7 +840,7 @@
                 ctx.strokeStyle = css.getPropertyValue("--surface");
                 ctx.strokeText(label, x, y);
                 ctx.lineWidth = 1;
-                ctx.fillStyle = css.getPropertyValue("--muted");
+                ctx.fillStyle = css.getPropertyValue("--text");
                 ctx.fillText(label, x, y);
             };
             for (let x = Math.ceil(left / step) * step; toScreen(x, 0)[0] < width; x += step) {
@@ -797,11 +907,13 @@
             h("div", { class: "heat-controls" },
                 h("label", {}, "Wereld ", worldSelect),
                 h("label", {}, "Speler ", playerSelect),
+                h("label", {}, mapToggle, " Kaart tonen"),
                 h("div", { class: "heat-zoom" },
                     zoomButton("Uitzoomen", "−", () => zoom(1 / 1.5)),
                     zoomButton("Inzoomen", "+", () => zoom(1.5)),
                     zoomButton("Alles tonen", "Alles tonen", () => { view = null; draw(); }))),
             h("div", { class: "heat-map" }, canvas, tip, none),
+            mapHint,
             h("div", { class: "grid" }, card("Drukste plekken", top, true)),
         ];
     }
