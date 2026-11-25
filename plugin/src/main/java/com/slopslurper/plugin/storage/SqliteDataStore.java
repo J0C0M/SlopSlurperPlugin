@@ -6,6 +6,7 @@ import com.slopslurper.plugin.storage.stats.CountEntry;
 import com.slopslurper.plugin.storage.stats.Overview;
 import com.slopslurper.plugin.storage.stats.PlayerDetail;
 import com.slopslurper.plugin.storage.stats.PlayerSummary;
+import com.slopslurper.plugin.storage.stats.PositionHeat;
 
 import java.io.File;
 import java.sql.Connection;
@@ -43,6 +44,11 @@ public final class SqliteDataStore implements DataStore {
 
     /** Basisfilter voor alle blokbreuk-queries. */
     private static final String BREAKS = "FROM events WHERE type = '" + EventTypes.BLOCK_BREAK + "'";
+
+    // Chunk = floor(x / 16). Met pure integer-rekenkunde, zodat negatieve
+    // coördinaten ook goed gaan (SQLite deelt richting nul af).
+    private static final String CHUNK_X = "((x - (((x % 16) + 16) % 16)) / 16)";
+    private static final String CHUNK_Z = "((z - (((z % 16) + 16) % 16)) / 16)";
 
     private final File file;
     private final Logger logger;
@@ -375,11 +381,7 @@ public final class SqliteDataStore implements DataStore {
 
     @Override
     public CompletableFuture<List<ChunkHeat>> getBlockBreakHeatmap(UUID player) {
-        // Chunk = floor(x / 16). Met pure integer-rekenkunde, zodat negatieve
-        // coördinaten ook goed gaan (SQLite deelt richting nul af).
-        String chunkX = "((x - (((x % 16) + 16) % 16)) / 16)";
-        String chunkZ = "((z - (((z % 16) + 16) % 16)) / 16)";
-        String sql = "SELECT world, " + chunkX + " AS cx, " + chunkZ + " AS cz, COUNT(*), MIN(y), MAX(y) "
+        String sql = "SELECT world, " + CHUNK_X + " AS cx, " + CHUNK_Z + " AS cz, COUNT(*), MIN(y), MAX(y) "
                 + BREAKS + " AND x IS NOT NULL" + (player != null ? " AND player_uuid = ?" : "")
                 + " GROUP BY world, cx, cz";
         return query(() -> {
@@ -389,6 +391,31 @@ public final class SqliteDataStore implements DataStore {
                 while (rs.next()) {
                     result.add(new ChunkHeat(rs.getString(1), rs.getInt(2), rs.getInt(3),
                             rs.getLong(4), rs.getInt(5), rs.getInt(6)));
+                }
+            }
+            return result;
+        });
+    }
+
+    @Override
+    public CompletableFuture<List<PositionHeat>> getPositionHeatmap(UUID player, String world) {
+        List<Object> params = new ArrayList<>();
+        String where = " WHERE 1 = 1";
+        if (player != null) {
+            where += " AND player_uuid = ?";
+            params.add(player.toString());
+        }
+        if (world != null) {
+            where += " AND world = ?";
+            params.add(world);
+        }
+        String sql = "SELECT world, " + CHUNK_X + " AS cx, " + CHUNK_Z + " AS cz, SUM(interval_ms) "
+                + "FROM position_samples" + where + " GROUP BY world, cx, cz";
+        return query(() -> {
+            List<PositionHeat> result = new ArrayList<>();
+            try (PreparedStatement ps = prepare(sql, params.toArray()); ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result.add(new PositionHeat(rs.getString(1), rs.getInt(2), rs.getInt(3), rs.getLong(4)));
                 }
             }
             return result;

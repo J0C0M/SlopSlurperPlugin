@@ -4,6 +4,7 @@ import com.slopslurper.plugin.storage.stats.ChunkHeat;
 import com.slopslurper.plugin.storage.stats.Overview;
 import com.slopslurper.plugin.storage.stats.PlayerDetail;
 import com.slopslurper.plugin.storage.stats.PlayerSummary;
+import com.slopslurper.plugin.storage.stats.PositionHeat;
 
 import java.util.List;
 import java.util.Optional;
@@ -62,4 +63,12 @@ public interface DataStore {
      * @param player alleen deze speler, of {@code null} voor iedereen
      */
     CompletableFuture<List<ChunkHeat>> getBlockBreakHeatmap(UUID player);
+
+    /**
+     * Doorgebrachte tijd per chunk, uit de positie-samples.
+     *
+     * @param player alleen deze speler, of {@code null} voor iedereen
+     * @param world  alleen deze wereld, of {@code null} voor alle werelden
+     */
+    CompletableFuture<List<PositionHeat>> getPositionHeatmap(UUID player, String world);
 }
