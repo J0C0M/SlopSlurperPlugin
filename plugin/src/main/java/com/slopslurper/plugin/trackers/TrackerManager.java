@@ -27,6 +27,7 @@ public final class TrackerManager {
             KillTracker::new,
             DeathTracker::new,
             FishTracker::new,
+            HealthTracker::new,
             PositionTracker::new
     );
 

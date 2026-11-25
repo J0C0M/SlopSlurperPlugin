@@ -35,6 +35,18 @@ public final class EventTypes {
     /** Vangst bij het vissen. subtype = gevangen item of entity, plek = dobber, meta.xp = XP. */
     public static final String FISH = "fish";
 
+    /** Opgetelde schade die een speler uitdeelt. subtype = type slachtoffer, item = wapen, value = levenspunten, meta.count = treffers. */
+    public static final String DAMAGE_DEALT = "damage_dealt";
+
+    /** Opgetelde schade die een speler krijgt. subtype = oorzaak (zoals bij DEATH), value = levenspunten, meta.count = treffers. */
+    public static final String DAMAGE_TAKEN = "damage_taken";
+
+    /** Opgetelde genezing. subtype = reden (bijv. SATIATED), value = levenspunten. */
+    public static final String HEAL = "heal";
+
+    /** Speler eet iets. subtype = item, meta.food_level = honger vooraf. */
+    public static final String EAT = "eat";
+
     /** Speler komt online. meta.session = sessie-id. */
     public static final String SESSION_START = "session_start";
 

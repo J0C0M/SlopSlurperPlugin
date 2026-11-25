@@ -67,7 +67,7 @@ public final class DeathTracker extends EventTracker {
         String damageType = source.getDamageType().getKey().getKey();
         Entity causing = source.getCausingEntity();
         boolean byOther = causing != null && !causing.getUniqueId().equals(player.getUniqueId());
-        String cause = byOther ? causing.getType().name() : damageType.toUpperCase(Locale.ROOT);
+        String cause = causeOf(source, player);
 
         int itemsLost = event.getKeepInventory() ? 0
                 : event.getDrops().stream().mapToInt(ItemStack::getAmount).sum();
@@ -89,5 +89,13 @@ public final class DeathTracker extends EventTracker {
             builder.meta("killer", killer.getName()).meta("killer_uuid", killer.getUniqueId().toString());
         }
         record(builder.time(now).build());
+    }
+
+    /** Type van de dader als die er is (en niet de speler zelf), anders het schadetype. */
+    static String causeOf(DamageSource source, Player victim) {
+        Entity causing = source.getCausingEntity();
+        return causing != null && !causing.getUniqueId().equals(victim.getUniqueId())
+                ? causing.getType().name()
+                : source.getDamageType().getKey().getKey().toUpperCase(Locale.ROOT);
     }
 }
