@@ -32,6 +32,7 @@ public final class TrackerManager {
             StationTracker::new,
             InteractionTracker::new,
             ItemTracker::new,
+            ProgressTracker::new,
             PositionTracker::new
     );
 

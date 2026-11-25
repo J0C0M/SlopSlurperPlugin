@@ -75,6 +75,7 @@ De plugin slaat spelersdata op in `run/plugins/SlopSlurperPlugin/data.db` (SQLit
 | `stations` | Smelten (item en aantal), enchanten (enchantments en levels), aambeeld (repareren, combineren, boek, hernoemen) en brouwen (op naam van wie de stand het laatst opende). Events `smelt`, `enchant`, `anvil` en `brew`. | – |
 | `interactions` | Rechtsklikken op deuren, luiken, poorten, knoppen, hendels, werkstations en redstone (opgeteld per bloktype), en slapen. Kisten en andere opslag niet. Events `interact` en `sleep`. | `flush-seconds` (60) |
 | `items` | Opgepakte en weggegooide items (opgeteld per item), en gereedschap en armor dat kapotgaat. Events `pickup`, `drop` en `item_break`. | `flush-seconds` (60) |
+| `progress` | Verdiende XP per bron (opgeteld), gestegen levels en advancements met de tijd sinds de eerste join. Events `xp`, `level` en `advancement`. | `flush-seconds` (60) |
 | `positions` | Elke paar seconden per speler: wereld, positie, biome, ondergronds of niet, voertuig (boot, paard, minecart, elytra) en welke spelers in de buurt zijn. Eigen tabel `position_samples`. | `sample-seconds` (10), `nearby-radius` (32) |
 
 **Over AFK:** iemand is AFK na `afk-timeout-seconds` zonder echte input. Als input telt: rondkijken, zelf lopen, springen, klikken, interacties, inventory, chat, commando's, sneaken, sprinten en van hotbar-slot wisselen. Meegevoerd worden door water, een minecart of een boot telt niet, dus AFK-pools werken niet om speeltijd te faken. De AFK-tijd telt terug vanaf de laatste input: wie 3 minuten stilstaat, heeft 3 minuten AFK.

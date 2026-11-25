@@ -77,6 +77,15 @@ public final class EventTypes {
     /** Gereedschap of armor gaat kapot. subtype = item. */
     public static final String ITEM_BREAK = "item_break";
 
+    /** Opgeteld verdiende XP. subtype = bron (bijv. ENTITY_DEATH), value = XP. */
+    public static final String XP = "xp";
+
+    /** Level omhoog. subtype = het nieuwe level, value = aantal levels erbij. */
+    public static final String LEVEL = "level";
+
+    /** Advancement behaald. subtype = naam (bijv. story/mine_stone), meta: since_join_ms, playtime_ms. */
+    public static final String ADVANCEMENT = "advancement";
+
     /** Speler komt online. meta.session = sessie-id. */
     public static final String SESSION_START = "session_start";
 
