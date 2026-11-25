@@ -444,7 +444,17 @@ public final class SqliteDataStore implements DataStore {
                     crafting(id, limit),
                     topSubtypes(EventTypes.FISH, id, limit),
                     movement(id),
-                    deaths(id, limit));
+                    deaths(id, limit),
+                    new Stats.Items(
+                            topValues(EventTypes.PICKUP, id, limit),
+                            topValues(EventTypes.DROP, id, limit),
+                            topSubtypes(EventTypes.ITEM_BREAK, id, limit)),
+                    topValues(EventTypes.INTERACT, id, limit),
+                    countOf(EventTypes.SLEEP, id),
+                    new Stats.Progress(
+                            topValues(EventTypes.XP, id, limit),
+                            topValues(EventTypes.LEVEL, id, Integer.MAX_VALUE).stream().mapToLong(CountEntry::amount).sum(),
+                            advancements(id, limit)));
         });
     }
 
@@ -495,6 +505,20 @@ public final class SqliteDataStore implements DataStore {
             while (rs.next()) {
                 result.add(new Stats.Death(rs.getString(1), rs.getString(2), rs.getString(3),
                         getInt(rs, 4), getInt(rs, 5), getInt(rs, 6), rs.getLong(7)));
+            }
+        }
+        return result;
+    }
+
+    private List<Stats.Advancement> advancements(String player, int limit) throws SQLException {
+        List<Stats.Advancement> result = new ArrayList<>();
+        try (PreparedStatement ps = prepareFor(player,
+                "SELECT player_name, subtype, created_at, json_extract(meta, '$.since_join_ms'), json_extract(meta, '$.playtime_ms') "
+                        + "FROM events WHERE type = '" + EventTypes.ADVANCEMENT + "'",
+                " ORDER BY created_at DESC LIMIT ?", limit);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                result.add(new Stats.Advancement(rs.getString(1), rs.getString(2), rs.getLong(3), rs.getLong(4), rs.getLong(5)));
             }
         }
         return result;
