@@ -36,6 +36,8 @@ import java.util.logging.Logger;
  *   GET /api/heatmap[?player=uuid] gebroken blokken per chunk
  *   GET /api/heatmap/positions[?player=uuid&world=naam] doorgebrachte tijd per chunk
  *   GET /api/stats[?player=uuid&days=N] sessies, doden, gevecht, items en beweging (speler of hele server)
+ *   GET /api/map?world=naam        instellingen van de platte kaart (404 als die er niet is)
+ *   GET /api/map/tile?world=naam&lod=1&x=0&z=0  één kaarttegel als PNG
  *   GET /api/config                instellingen voor de frontend (bijv. of de 3D-kaart beschikbaar is)
  */
 public final class WebServer {
@@ -56,17 +58,19 @@ public final class WebServer {
     private final String host;
     private final int port;
     private final String blueMapUrl; // null als BlueMap niet geïnstalleerd is
+    private final MapTiles mapTiles; // null als BlueMap niet geïnstalleerd is
     private final Gson gson = new GsonBuilder().create();
 
     private HttpServer server;
     private ExecutorService executor;
 
-    public WebServer(DataStore store, Logger logger, String host, int port, String blueMapUrl) {
+    public WebServer(DataStore store, Logger logger, String host, int port, String blueMapUrl, MapTiles mapTiles) {
         this.store = store;
         this.logger = logger;
         this.host = host;
         this.port = port;
         this.blueMapUrl = blueMapUrl;
+        this.mapTiles = mapTiles;
     }
 
     public void start() throws IOException {
@@ -113,6 +117,8 @@ public final class WebServer {
                 config.put("blueMapEnabled", blueMapUrl != null);
                 config.put("blueMapUrl", blueMapUrl);
                 sendJson(exchange, 200, config);
+            } else if (path.equals("/api/map") || path.equals("/api/map/tile")) {
+                handleMap(exchange, path.endsWith("/tile"));
             } else if (path.equals("/api/heatmap") || path.equals("/api/heatmap/positions") || path.equals("/api/stats")) {
                 UUID player = null;
                 String playerParam = queryParam(exchange.getRequestURI(), "player");
@@ -181,6 +187,39 @@ public final class WebServer {
                 sendText(exchange, 200, contentType(file), in.readAllBytes());
             }
         }
+    }
+
+    private void handleMap(HttpExchange exchange, boolean tile) throws IOException {
+        URI uri = exchange.getRequestURI();
+        String world = queryParam(uri, "world");
+        byte[] body = null;
+        try {
+            if (mapTiles != null && world != null) {
+                body = !tile ? mapTiles.settings(world) : mapTiles.tile(world,
+                        intParam(uri, "lod"), intParam(uri, "x"), intParam(uri, "z"));
+            }
+        } catch (NumberFormatException e) {
+            sendJson(exchange, 400, Map.of("error", "lod, x en z moeten getallen zijn"));
+            return;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            // BlueMap (nog) niet bereikbaar: de heatmap werkt ook zonder kaart
+            logger.log(Level.FINE, "Kaart niet opgehaald", e);
+        }
+        if (body == null && tile) {
+            exchange.sendResponseHeaders(204, -1); // niet gerenderd; heel gewoon, dus geen fout
+            return;
+        }
+        if (body == null) {
+            sendJson(exchange, 404, Map.of("error", "Geen kaart"));
+            return;
+        }
+        sendText(exchange, 200, tile ? "image/png" : "application/json; charset=utf-8", body);
+    }
+
+    private static int intParam(URI uri, String key) {
+        return Integer.parseInt(String.valueOf(queryParam(uri, key)));
     }
 
     /** Waarde van een queryparameter, of {@code null} als die ontbreekt of leeg is. */

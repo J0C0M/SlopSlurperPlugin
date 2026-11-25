@@ -184,7 +184,7 @@ De plugin slaat spelersdata op in `run/plugins/SlopSlurperPlugin/data.db` (SQLit
 - **Dashboard:** zodra de server draait, open je **http://localhost:8080/**.
   - **Overzicht:** kerncijfers van de hele server, met tabbladen Spelers, Activiteit (speeltijd per dag, AFK, afstand), Blokken, Gevecht (ook de laatste doden met plek), Items, Crafting en Voortgang (XP en advancements).
   - **Per speler:** verdeeld over de tabbladen Activiteit, Blokken, Gevecht, Items, Crafting, Voortgang en Locaties: speeltijd en AFK, de laatste sessies, activiteit per dag en per uur, blokken, gereedschap, gedode mobs en spelers, doodsoorzaken, schade, genezing, eten, crafting, smelten, enchanten, aambeeld, brouwen, en uit de posities: tijd per wereld en biome, ondergronds of bovengronds, tijd in voertuigen en met wie de speler het meest speelt.
-  - **Heatmap:** waar spelers hun tijd doorbrengen, per wereld en voor iedereen of één speler. Je kunt zoomen (scrollen of knoppen) en slepen.
+  - **Heatmap:** waar spelers hun tijd doorbrengen, per wereld en voor iedereen of één speler. Je kunt zoomen (scrollen of knoppen) en slepen. Op de achtergrond staat een platte kaart van de wereld, als BlueMap geïnstalleerd is en de wereld gerenderd heeft; anders zie je alleen het raster.
   - De pagina ververst elke 10 seconden.
 
 Het dashboard is standaard alleen bereikbaar vanaf je eigen pc. De poort en het adres stel je in via `run/plugins/SlopSlurperPlugin/config.yml`.
@@ -214,6 +214,7 @@ Het dashboard haalt alles uit een JSON-API. Wil je later een andere frontend of 
 | `GET /api/heatmap[?player={uuid}]` | Gebroken blokken per chunk (wereld, chunk x/z, aantal, min/max y) |
 | `GET /api/heatmap/positions[?player={uuid}&world={naam}]` | Doorgebrachte tijd per chunk (wereld, chunk x/z, tijd in ms), uit de positie-samples |
 | `GET /api/stats[?player={uuid}&days=14]` | Sessies, blokken per uur, gebruikte blokken, gevecht, doden met plek, items, crafting, voortgang en geschatte afstand, voor één speler of de hele server |
+| `GET /api/map?world={naam}` en `/api/map/tile?world={naam}&lod=1&x=0&z=0` | Platte kaart van BlueMap: instellingen (JSON) en tegels (PNG). Zonder kaart 404, voor een niet-gerenderde tegel 204 |
 | `GET /api/config` | Instellingen voor de frontend, bijvoorbeeld of de 3D-kaart beschikbaar is |
 
 ### Opbouw

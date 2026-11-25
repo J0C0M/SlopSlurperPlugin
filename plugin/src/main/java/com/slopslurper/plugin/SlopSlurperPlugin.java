@@ -6,6 +6,7 @@ import com.slopslurper.plugin.listeners.PlayerJoinListener;
 import com.slopslurper.plugin.storage.DataStore;
 import com.slopslurper.plugin.storage.SqliteDataStore;
 import com.slopslurper.plugin.trackers.TrackerManager;
+import com.slopslurper.plugin.web.MapTiles;
 import com.slopslurper.plugin.web.WebServer;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -69,7 +70,8 @@ public final class SlopSlurperPlugin extends JavaPlugin {
         String host = getConfig().getString("dashboard.host", "127.0.0.1");
         int port = getConfig().getInt("dashboard.port", 8080);
         String blueMapUrl = blueMapPresent ? getConfig().getString("dashboard.bluemap-url", "http://localhost:8100/") : null;
-        webServer = new WebServer(database, getLogger(), host, port, blueMapUrl);
+        MapTiles mapTiles = blueMapPresent ? new MapTiles(blueMapUrl, blueMapHeatmap::mapIds) : null;
+        webServer = new WebServer(database, getLogger(), host, port, blueMapUrl, mapTiles);
         try {
             webServer.start();
             getLogger().info("Dashboard draait op " + webServer.url());
