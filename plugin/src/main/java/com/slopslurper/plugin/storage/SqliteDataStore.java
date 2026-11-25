@@ -248,10 +248,11 @@ public final class SqliteDataStore implements DataStore {
     @Override
     public CompletableFuture<BlockStats> getBlockStats(UUID player, int limit) {
         String id = player.toString();
+        Scope who = new Scope(id, PlayerFilter.ALL);
         return query(() -> {
-            long total = countOf(EventTypes.BLOCK_BREAK, id);
-            long placed = countOf(EventTypes.BLOCK_PLACE, id);
-            List<BlockStats.Entry> top = topSubtypes(EventTypes.BLOCK_BREAK, id, limit).stream()
+            long total = countOf(EventTypes.BLOCK_BREAK, who);
+            long placed = countOf(EventTypes.BLOCK_PLACE, who);
+            List<BlockStats.Entry> top = topSubtypes(EventTypes.BLOCK_BREAK, who, limit).stream()
                     .map(c -> new BlockStats.Entry(c.key(), c.amount())).toList();
             return new BlockStats(total, placed, top);
         });
@@ -260,6 +261,7 @@ public final class SqliteDataStore implements DataStore {
     @Override
     public CompletableFuture<Overview> getOverview(int limit, PlayerFilter filter) {
         return query(() -> {
+            Scope who = new Scope(null, filter);
             long players = single("SELECT COUNT(DISTINCT player_uuid) FROM events WHERE player_uuid IS NOT NULL"
                     + filter.and("player_uuid"));
             long playtime = single("SELECT COALESCE(SUM(" + SESSION_DURATION + "), 0) FROM sessions WHERE 1 = 1"
@@ -269,16 +271,16 @@ public final class SqliteDataStore implements DataStore {
             List<PlayerSummary> topPlayers = summaries(
                     playerSummarySql(false, filter) + " ORDER BY playtime DESC, total DESC LIMIT ?", limit);
             return new Overview(
-                    countOf(EventTypes.BLOCK_BREAK, filter),
-                    countOf(EventTypes.BLOCK_PLACE, filter),
-                    countOf(EventTypes.MOB_KILL, filter),
-                    countOf(EventTypes.PVP_KILL, filter),
-                    countOf(EventTypes.DEATH, filter),
+                    countOf(EventTypes.BLOCK_BREAK, who),
+                    countOf(EventTypes.BLOCK_PLACE, who),
+                    countOf(EventTypes.MOB_KILL, who),
+                    countOf(EventTypes.PVP_KILL, who),
+                    countOf(EventTypes.DEATH, who),
                     players, playtime, afk,
-                    topSubtypes(EventTypes.BLOCK_BREAK, filter, limit),
-                    topSubtypes(EventTypes.BLOCK_PLACE, filter, limit),
-                    topSubtypes(EventTypes.MOB_KILL, filter, limit),
-                    topSubtypes(EventTypes.DEATH, filter, limit),
+                    topSubtypes(EventTypes.BLOCK_BREAK, who, limit),
+                    topSubtypes(EventTypes.BLOCK_PLACE, who, limit),
+                    topSubtypes(EventTypes.MOB_KILL, who, limit),
+                    topSubtypes(EventTypes.DEATH, who, limit),
                     topPlayers);
         });
     }
@@ -291,6 +293,7 @@ public final class SqliteDataStore implements DataStore {
     @Override
     public CompletableFuture<Optional<PlayerDetail>> getPlayer(UUID player, int limit, long activitySince) {
         String id = player.toString();
+        Scope who = new Scope(id, PlayerFilter.ALL);
         return query(() -> {
             List<PlayerSummary> found = summaries(playerSummarySql(true, PlayerFilter.ALL), id);
             if (found.isEmpty()) {
@@ -324,33 +327,33 @@ public final class SqliteDataStore implements DataStore {
                 }
             }
             return Optional.of(new PlayerDetail(found.get(0),
-                    topSubtypes(EventTypes.BLOCK_BREAK, id, limit),
-                    topSubtypes(EventTypes.BLOCK_PLACE, id, limit),
+                    topSubtypes(EventTypes.BLOCK_BREAK, who, limit),
+                    topSubtypes(EventTypes.BLOCK_PLACE, who, limit),
                     tools, worlds,
-                    topSubtypes(EventTypes.MOB_KILL, id, limit),
-                    topSubtypes(EventTypes.PVP_KILL, id, limit),
-                    topSubtypes(EventTypes.DEATH, id, limit),
-                    topSubtypes(EventTypes.FISH, id, limit),
+                    topSubtypes(EventTypes.MOB_KILL, who, limit),
+                    topSubtypes(EventTypes.PVP_KILL, who, limit),
+                    topSubtypes(EventTypes.DEATH, who, limit),
+                    topSubtypes(EventTypes.FISH, who, limit),
                     activity, recent, places(id, limit),
-                    health(id, limit), crafting(id, limit)));
+                    health(who, limit), crafting(who, limit)));
         });
     }
 
-    private PlayerDetail.Health health(String id, int limit) throws SQLException {
+    private PlayerDetail.Health health(Scope who, int limit) throws SQLException {
         return new PlayerDetail.Health(
-                topValues(EventTypes.DAMAGE_DEALT, id, limit),
-                topValues(EventTypes.DAMAGE_TAKEN, id, limit),
-                topValues(EventTypes.HEAL, id, limit),
-                topSubtypes(EventTypes.EAT, id, limit));
+                topValues(EventTypes.DAMAGE_DEALT, who, limit),
+                topValues(EventTypes.DAMAGE_TAKEN, who, limit),
+                topValues(EventTypes.HEAL, who, limit),
+                topSubtypes(EventTypes.EAT, who, limit));
     }
 
-    private PlayerDetail.Crafting crafting(String id, int limit) throws SQLException {
+    private PlayerDetail.Crafting crafting(Scope who, int limit) throws SQLException {
         return new PlayerDetail.Crafting(
-                topValues(EventTypes.CRAFT, id, limit),
-                topValues(EventTypes.SMELT, id, limit),
-                topSubtypes(EventTypes.ENCHANT, id, limit),
-                topSubtypes(EventTypes.ANVIL, id, limit),
-                topValues(EventTypes.BREW, id, limit));
+                topValues(EventTypes.CRAFT, who, limit),
+                topValues(EventTypes.SMELT, who, limit),
+                topSubtypes(EventTypes.ENCHANT, who, limit),
+                topSubtypes(EventTypes.ANVIL, who, limit),
+                topValues(EventTypes.BREW, who, limit));
     }
 
     /** Waar de speler zijn tijd doorbrengt, uit {@code position_samples}. */
@@ -431,51 +434,64 @@ public final class SqliteDataStore implements DataStore {
     }
 
     @Override
-    public CompletableFuture<Stats> getStats(UUID player, int limit, long since) {
-        String id = player == null ? null : player.toString();
+    public CompletableFuture<Stats> getStats(UUID player, int limit, long since, PlayerFilter filter) {
+        Scope who = new Scope(player == null ? null : player.toString(), filter);
         return query(() -> {
-            String sessions = " FROM sessions" + (id == null ? "" : " WHERE player_uuid = ?");
-            Object[] who = id == null ? new Object[0] : new Object[]{id};
+            String sessions = " FROM sessions WHERE 1 = 1" + who.and();
+            Object[] args = who.args();
             return new Stats(
-                    single("SELECT COUNT(*)" + sessions, who),
-                    single("SELECT COALESCE(SUM(" + SESSION_DURATION + "), 0)" + sessions, who),
-                    single("SELECT COALESCE(SUM(afk_ms), 0)" + sessions, who),
-                    intervals(id, since),
-                    blocksPerHour(id, since),
-                    topSubtypes(EventTypes.MOB_KILL, id, limit),
-                    topSubtypes(EventTypes.PVP_KILL, id, limit),
-                    topSubtypes(EventTypes.DEATH, id, limit),
-                    health(id, limit),
-                    crafting(id, limit),
-                    topSubtypes(EventTypes.FISH, id, limit),
-                    movement(id),
-                    deaths(id, limit),
+                    single("SELECT COUNT(*)" + sessions, args),
+                    single("SELECT COALESCE(SUM(" + SESSION_DURATION + "), 0)" + sessions, args),
+                    single("SELECT COALESCE(SUM(afk_ms), 0)" + sessions, args),
+                    intervals(who, since),
+                    blocksPerHour(who, since),
+                    topSubtypes(EventTypes.MOB_KILL, who, limit),
+                    topSubtypes(EventTypes.PVP_KILL, who, limit),
+                    topSubtypes(EventTypes.DEATH, who, limit),
+                    health(who, limit),
+                    crafting(who, limit),
+                    topSubtypes(EventTypes.FISH, who, limit),
+                    movement(who),
+                    deaths(who, limit),
                     new Stats.Items(
-                            topValues(EventTypes.PICKUP, id, limit),
-                            topValues(EventTypes.DROP, id, limit),
-                            topSubtypes(EventTypes.ITEM_BREAK, id, limit)),
-                    topValues(EventTypes.INTERACT, id, limit),
-                    countOf(EventTypes.SLEEP, id),
+                            topValues(EventTypes.PICKUP, who, limit),
+                            topValues(EventTypes.DROP, who, limit),
+                            topSubtypes(EventTypes.ITEM_BREAK, who, limit)),
+                    topValues(EventTypes.INTERACT, who, limit),
+                    countOf(EventTypes.SLEEP, who),
                     new Stats.Progress(
-                            topValues(EventTypes.XP, id, limit),
-                            topValues(EventTypes.LEVEL, id, Integer.MAX_VALUE).stream().mapToLong(CountEntry::amount).sum(),
-                            advancements(id, limit)));
+                            topValues(EventTypes.XP, who, limit),
+                            topValues(EventTypes.LEVEL, who, Integer.MAX_VALUE).stream().mapToLong(CountEntry::amount).sum(),
+                            advancements(who, limit)));
         });
     }
 
-    /** Voegt {@code AND player_uuid = ?} toe als er een speler is. */
-    private PreparedStatement prepareFor(String player, String select, String rest, Object... params) throws SQLException {
-        if (player == null) {
-            return prepare(select + rest, params);
+    /** Over wie een query gaat: één speler, of ({@code player == null}) iedereen binnen het filter. */
+    private record Scope(String player, PlayerFilter filter) {
+
+        /** SQL-voorwaarde, inclusief voorafgaande {@code AND}; parameters via {@link #args}. */
+        String and() {
+            return (player == null ? "" : " AND player_uuid = ?") + filter.and("player_uuid");
         }
-        List<Object> all = new ArrayList<>(List.of(params));
-        all.add(0, player);
-        return prepare(select + " AND player_uuid = ?" + rest, all.toArray());
+
+        /** De parameter van {@link #and()}, gevolgd door {@code rest}. */
+        Object[] args(Object... rest) {
+            List<Object> all = new ArrayList<>(List.of(rest));
+            if (player != null) {
+                all.add(0, player);
+            }
+            return all.toArray();
+        }
     }
 
-    private List<Stats.Interval> intervals(String player, long since) throws SQLException {
+    /** {@code select} + voorwaarde op de speler(s) + {@code rest}. */
+    private PreparedStatement prepareFor(Scope who, String select, String rest, Object... params) throws SQLException {
+        return prepare(select + who.and() + rest, who.args(params));
+    }
+
+    private List<Stats.Interval> intervals(Scope who, long since) throws SQLException {
         List<Stats.Interval> result = new ArrayList<>();
-        try (PreparedStatement ps = prepareFor(player,
+        try (PreparedStatement ps = prepareFor(who,
                 "SELECT started_at, COALESCE(ended_at, last_seen_at) AS until, afk_ms FROM sessions WHERE 1 = 1",
                 " AND COALESCE(ended_at, last_seen_at) >= ? ORDER BY started_at", since);
              ResultSet rs = ps.executeQuery()) {
@@ -486,9 +502,9 @@ public final class SqliteDataStore implements DataStore {
         return result;
     }
 
-    private List<Stats.BlockBucket> blocksPerHour(String player, long since) throws SQLException {
+    private List<Stats.BlockBucket> blocksPerHour(Scope who, long since) throws SQLException {
         List<Stats.BlockBucket> result = new ArrayList<>();
-        try (PreparedStatement ps = prepareFor(player,
+        try (PreparedStatement ps = prepareFor(who,
                 "SELECT (created_at / 3600000) * 3600000 AS hour, "
                         + "SUM(type = '" + EventTypes.BLOCK_BREAK + "'), SUM(type = '" + EventTypes.BLOCK_PLACE + "') "
                         + "FROM events WHERE type IN ('" + EventTypes.BLOCK_BREAK + "', '" + EventTypes.BLOCK_PLACE + "')",
@@ -501,9 +517,9 @@ public final class SqliteDataStore implements DataStore {
         return result;
     }
 
-    private List<Stats.Death> deaths(String player, int limit) throws SQLException {
+    private List<Stats.Death> deaths(Scope who, int limit) throws SQLException {
         List<Stats.Death> result = new ArrayList<>();
-        try (PreparedStatement ps = prepareFor(player,
+        try (PreparedStatement ps = prepareFor(who,
                 "SELECT player_name, subtype, world, x, y, z, created_at FROM events WHERE type = '" + EventTypes.DEATH + "'",
                 " ORDER BY created_at DESC LIMIT ?", limit);
              ResultSet rs = ps.executeQuery()) {
@@ -515,9 +531,9 @@ public final class SqliteDataStore implements DataStore {
         return result;
     }
 
-    private List<Stats.Advancement> advancements(String player, int limit) throws SQLException {
+    private List<Stats.Advancement> advancements(Scope who, int limit) throws SQLException {
         List<Stats.Advancement> result = new ArrayList<>();
-        try (PreparedStatement ps = prepareFor(player,
+        try (PreparedStatement ps = prepareFor(who,
                 "SELECT player_name, subtype, created_at, json_extract(meta, '$.since_join_ms'), json_extract(meta, '$.playtime_ms') "
                         + "FROM events WHERE type = '" + EventTypes.ADVANCEMENT + "'",
                 " ORDER BY created_at DESC LIMIT ?", limit);
@@ -539,9 +555,9 @@ public final class SqliteDataStore implements DataStore {
      * Bochten tellen dus niet mee. Gaten (uitgelogd, dood), wereldwissels en onmogelijk hoge
      * snelheden (teleports) slaan we over.
      */
-    private List<CountEntry> movement(String player) throws SQLException {
+    private List<CountEntry> movement(Scope who) throws SQLException {
         Map<String, Double> blocks = new LinkedHashMap<>();
-        try (PreparedStatement ps = prepareFor(player,
+        try (PreparedStatement ps = prepareFor(who,
                 "SELECT player_uuid, world, x, y, z, vehicle, game_mode, interval_ms, created_at FROM position_samples WHERE 1 = 1",
                 " ORDER BY player_uuid, created_at");
              ResultSet rs = ps.executeQuery()) {
@@ -629,35 +645,21 @@ public final class SqliteDataStore implements DataStore {
         }, executor);
     }
 
-    /** Aantal events van een type, voor één speler. */
-    private long countOf(String type, String player) throws SQLException {
-        return single("SELECT COUNT(*) FROM events WHERE type = ? AND player_uuid = ?", type, player);
+    /** Aantal events van een type. */
+    private long countOf(String type, Scope who) throws SQLException {
+        return single("SELECT COUNT(*) FROM events WHERE type = '" + type + "'" + who.and(), who.args());
     }
 
-    /** Aantal events van een type, voor alle spelers binnen het filter. */
-    private long countOf(String type, PlayerFilter filter) throws SQLException {
-        return single("SELECT COUNT(*) FROM events WHERE type = ?" + filter.and("player_uuid"), type);
-    }
-
-    /** Meest voorkomende subtypes van een type, voor één speler. */
-    private List<CountEntry> topSubtypes(String type, String player, int limit) throws SQLException {
-        return counts("SELECT subtype, COUNT(*) AS n FROM events WHERE type = ? AND player_uuid = ? "
-                + "GROUP BY subtype ORDER BY n DESC LIMIT ?", type, player, limit);
-    }
-
-    /** Meest voorkomende subtypes van een type, voor alle spelers binnen het filter. */
-    private List<CountEntry> topSubtypes(String type, PlayerFilter filter, int limit) throws SQLException {
-        return counts("SELECT subtype, COUNT(*) AS n FROM events WHERE type = ?" + filter.and("player_uuid")
-                + " GROUP BY subtype ORDER BY n DESC LIMIT ?", type, limit);
+    /** Meest voorkomende subtypes van een type. */
+    private List<CountEntry> topSubtypes(String type, Scope who, int limit) throws SQLException {
+        return counts("SELECT subtype, COUNT(*) AS n FROM events WHERE type = '" + type + "'" + who.and()
+                + " GROUP BY subtype ORDER BY n DESC LIMIT ?", who.args(limit));
     }
 
     /** Als {@link #topSubtypes}, maar telt {@code value} op (aantal items, levenspunten) in plaats van rijen. */
-    private List<CountEntry> topValues(String type, String player, int limit) throws SQLException {
-        String select = "SELECT subtype, ROUND(SUM(value)) AS n FROM events WHERE type = ? ";
-        String group = "GROUP BY subtype ORDER BY n DESC LIMIT ?";
-        return player == null
-                ? counts(select + group, type, limit)
-                : counts(select + "AND player_uuid = ? " + group, type, player, limit);
+    private List<CountEntry> topValues(String type, Scope who, int limit) throws SQLException {
+        return counts("SELECT subtype, ROUND(SUM(value)) AS n FROM events WHERE type = '" + type + "'" + who.and()
+                + " GROUP BY subtype ORDER BY n DESC LIMIT ?", who.args(limit));
     }
 
     private long single(String sql, Object... params) throws SQLException {
