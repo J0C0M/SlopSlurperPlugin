@@ -54,6 +54,11 @@ trackers:
     enabled: true
     # Zo vaak wordt het opgetelde totaal opgeslagen.
     flush-seconds: 60
+  # Opgepakte, weggegooide en kapotte items.
+  items:
+    enabled: true
+    # Zo vaak wordt het opgetelde totaal opgeslagen.
+    flush-seconds: 60
   # Elke paar seconden per speler: wereld, positie, biome, ondergronds, voertuig
   # en wie er in de buurt is. Basis voor "waar besteden spelers hun tijd".
   positions:
