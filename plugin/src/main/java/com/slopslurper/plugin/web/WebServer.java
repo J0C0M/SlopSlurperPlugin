@@ -35,6 +35,7 @@ import java.util.logging.Logger;
  *   GET /api/players/{uuid}?days=N details van één speler (activiteit van de laatste N dagen)
  *   GET /api/heatmap[?player=uuid] gebroken blokken per chunk
  *   GET /api/heatmap/positions[?player=uuid&world=naam] doorgebrachte tijd per chunk
+ *   GET /api/stats[?player=uuid&days=N] sessies, doden, gevecht, items en beweging (speler of hele server)
  *   GET /api/config                instellingen voor de frontend (bijv. of de 3D-kaart beschikbaar is)
  */
 public final class WebServer {
@@ -112,7 +113,7 @@ public final class WebServer {
                 config.put("blueMapEnabled", blueMapUrl != null);
                 config.put("blueMapUrl", blueMapUrl);
                 sendJson(exchange, 200, config);
-            } else if (path.equals("/api/heatmap") || path.equals("/api/heatmap/positions")) {
+            } else if (path.equals("/api/heatmap") || path.equals("/api/heatmap/positions") || path.equals("/api/stats")) {
                 UUID player = null;
                 String playerParam = queryParam(exchange.getRequestURI(), "player");
                 if (playerParam != null) {
@@ -123,7 +124,10 @@ public final class WebServer {
                         return;
                     }
                 }
-                if (path.equals("/api/heatmap")) {
+                if (path.equals("/api/stats")) {
+                    long since = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(parseDays(exchange.getRequestURI()));
+                    sendJson(exchange, 200, await(store.getStats(player, TOP_SIZE, since)));
+                } else if (path.equals("/api/heatmap")) {
                     sendJson(exchange, 200, await(store.getBlockBreakHeatmap(player)));
                 } else {
                     String world = queryParam(exchange.getRequestURI(), "world");

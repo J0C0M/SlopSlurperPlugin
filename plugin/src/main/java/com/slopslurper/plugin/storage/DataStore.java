@@ -5,6 +5,7 @@ import com.slopslurper.plugin.storage.stats.Overview;
 import com.slopslurper.plugin.storage.stats.PlayerDetail;
 import com.slopslurper.plugin.storage.stats.PlayerSummary;
 import com.slopslurper.plugin.storage.stats.PositionHeat;
+import com.slopslurper.plugin.storage.stats.Stats;
 
 import java.util.List;
 import java.util.Optional;
@@ -71,4 +72,12 @@ public interface DataStore {
      * @param world  alleen deze wereld, of {@code null} voor alle werelden
      */
     CompletableFuture<List<PositionHeat>> getPositionHeatmap(UUID player, String world);
+
+    /**
+     * Sessies, doden, gevecht, items en beweging.
+     *
+     * @param player alleen deze speler, of {@code null} voor de hele server
+     * @param since  begin van de periode voor de gegevens per dag (epoch ms)
+     */
+    CompletableFuture<Stats> getStats(UUID player, int limit, long since);
 }

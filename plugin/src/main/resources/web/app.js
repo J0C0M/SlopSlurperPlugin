@@ -125,6 +125,27 @@
 
     const asIs = key => key;
 
+    function movementType(key) {
+        return { FOOT: "Te voet", CREATIVE: "Creative of spectator" }[key] ?? pretty(key);
+    }
+
+    /** 1500 -> "1,5 km" (één blok is één meter) */
+    const blockDistance = m => m < 1000 ? `${nf.format(m)} m` : `${nf.format(Math.round(m / 100) / 10)} km`;
+
+    /** Laatste doden met de plek; op het serveroverzicht ook wie. */
+    function deathTable(deaths, showPlayer) {
+        return h("div", { class: "table-wrap" }, h("table", { class: "static" },
+            h("thead", {}, h("tr", {},
+                showPlayer ? h("th", {}, "Speler") : null,
+                h("th", {}, "Oorzaak"), h("th", {}, "Wereld"), h("th", {}, "Plek (x, y, z)"), h("th", {}, "Wanneer"))),
+            h("tbody", {}, deaths.map(d => h("tr", {},
+                showPlayer ? h("td", {}, d.player ?? "–") : null,
+                h("td", {}, deathCause(d.cause)),
+                h("td", {}, d.world ? prettyWorld(d.world) : "–"),
+                h("td", {}, d.x == null ? "–" : `${d.x}, ${d.y}, ${d.z}`),
+                h("td", {}, dateTimeFmt.format(new Date(d.time))))))));
+    }
+
     /** Levenspunten -> harten: 7 -> "3,5 ♥" */
     const hearts = points => `${nf.format(points / 2)} ♥`;
 
@@ -200,26 +221,59 @@
 
     // ---------- Activiteit (uur-buckets uit de API) ----------
 
-    function perDay(activity, days) {
-        const counts = new Map();
-        for (const b of activity) {
-            const d = new Date(b.hourStart);
-            const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-            counts.set(key, (counts.get(key) ?? 0) + b.count);
-        }
-        const points = [];
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const dayFmt = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short" });
-        for (let i = days - 1; i >= 0; i--) {
-            const d = new Date(today);
-            d.setDate(today.getDate() - i);
-            const value = counts.get(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`) ?? 0;
-            const label = dayFmt.format(d);
-            points.push({ label, value, title: `${label}: ${nf.format(value)} blokken` });
-        }
-        return points;
+    /** Gestapelde kolommen. points: [{label, values, title}], series: namen in dezelfde volgorde als values. */
+    function stackedChart(points, series, labelEvery = 1) {
+        const max = Math.max(1, ...points.map(p => p.values[0] + p.values[1]));
+        return h("div", {},
+            h("div", { class: "series-legend" }, series.map((name, i) =>
+                h("span", {}, h("i", { class: `series-${i}`, "aria-hidden": "true" }), name))),
+            h("div", { class: "columns", role: "img", "aria-label": points.map(p => p.title).join(", ") },
+                points.map(p => h("div", { class: "column stacked", title: p.title },
+                    p.values.map((v, i) => v > 0
+                        ? h("div", { class: `column-fill series-${i}`, style: `height:${(v / max) * 100}%` }) : null)))),
+            h("div", { class: "column-labels", "aria-hidden": "true" },
+                points.map((p, i) => h("span", {}, i % labelEvery === 0 ? p.label : ""))));
     }
+
+    /** De laatste N dagen als [{start, end, label, values: [0, 0]}], in de tijdzone van de kijker. */
+    function lastDays(days) {
+        const fmt = new Intl.DateTimeFormat("nl-NL", { day: "numeric", month: "short" });
+        const today = new Date();
+        return Array.from({ length: days }, (_, i) => {
+            // via Date, zodat dagen met wintertijd of zomertijd (23 of 25 uur) kloppen
+            const at = offset => new Date(today.getFullYear(), today.getMonth(), today.getDate() - days + 1 + i + offset);
+            return { start: +at(0), end: +at(1), label: fmt.format(at(0)), values: [0, 0] };
+        });
+    }
+
+    /** Speeltijd per dag, gesplitst in actief en AFK. Een sessie over middernacht telt op beide dagen. */
+    function playtimePerDay(intervals, days) {
+        const points = lastDays(days);
+        for (const s of intervals) {
+            const length = s.end - s.start;
+            if (length <= 0) continue;
+            for (const day of points) {
+                const part = Math.max(0, Math.min(s.end, day.end) - Math.max(s.start, day.start));
+                // Wanneer iemand AFK was weten we hier niet, dus naar verhouding verdelen
+                const afk = part * Math.min(1, s.afkMs / length);
+                day.values[0] += part - afk;
+                day.values[1] += afk;
+            }
+        }
+        return points.map(p => ({ ...p, title: `${p.label}: ${duration(p.values[0])} actief, ${duration(p.values[1])} AFK` }));
+    }
+
+    function blocksPerDay(buckets, days) {
+        const points = lastDays(days);
+        for (const b of buckets) {
+            const day = points.find(p => b.hourStart >= p.start && b.hourStart < p.end);
+            if (!day) continue;
+            day.values[0] += b.broken;
+            day.values[1] += b.placed;
+        }
+        return points.map(p => ({ ...p, title: `${p.label}: ${nf.format(p.values[0])} gebroken, ${nf.format(p.values[1])} geplaatst` }));
+    }
+
 
     function perHourOfDay(activity) {
         const counts = new Array(24).fill(0);
@@ -233,21 +287,8 @@
 
     // ---------- Pagina's ----------
 
-    async function renderOverview() {
-        const [overview, players] = await Promise.all([api("/api/overview"), api("/api/players")]);
-
-        if (!overview || overview.playerCount === 0) {
-            return [
-                h("h1", {}, "Overzicht"),
-                h("p", { class: "subtitle" }, "Wat spelers op deze server doen."),
-                h("div", { class: "card" }, empty("Nog geen data",
-                    "Join de server en breek een paar blokken. Dit dashboard ververst vanzelf.")),
-            ];
-        }
-
-        const top = overview.topBlocks[0];
-        const topCause = overview.topDeathCauses[0];
-        const table = h("table", {},
+    function playerTable(players) {
+        return h("div", { class: "table-wrap" }, h("table", {},
             h("thead", {}, h("tr", {},
                 h("th", {}, "Speler"),
                 h("th", { class: "num" }, "Speeltijd"),
@@ -265,8 +306,43 @@
                     h("td", { class: "num", title: `${nf.format(p.mobKills)} mobs, ${nf.format(p.pvpKills)} spelers` },
                         nf.format(p.mobKills + p.pvpKills)),
                     h("td", { class: "num" }, nf.format(p.deaths)),
-                    h("td", { class: "num" }, timeAgo(p.lastActive))))));
+                    h("td", { class: "num" }, timeAgo(p.lastActive)))))));
+    }
 
+    /** Tabbladen van het overzicht. Net als bij een speler, maar zonder detail: het gaat om de hele server. */
+    const OVERVIEW_TABS = [
+        { id: "spelers", label: "Spelers", blocks: ({ players }) => [{ title: "Spelers", content: playerTable(players), wide: true }] },
+        { id: "activiteit", label: "Activiteit", blocks: ({ stats }) => {
+            const [perDay, afk] = playtimeBlocks(stats);
+            return [{ ...perDay, wide: true }, afk, movementBlock(stats)];
+        } },
+        { id: "blokken", label: "Blokken", blocks: ({ overview, stats }) => [
+            blocksPerDayBlock(stats),
+            bars("Meest gebroken blokken", overview.topBlocks),
+            bars("Meest geplaatste blokken", overview.topPlaced)] },
+        { id: "gevecht", label: "Gevecht", blocks: ({ stats }) => combatBlocks({ stats }) },
+        { id: "items", label: "Items", blocks: ({ stats }) => itemBlocks({ stats }) },
+    ];
+
+    async function renderOverview(tabId, useCache) {
+        const data = await pageData("overview", useCache, async () => {
+            const [overview, players, stats] = await Promise.all([
+                api("/api/overview"), api("/api/players"), api(`/api/stats?days=${DAYS}`)]);
+            return { overview, players, stats };
+        });
+        const { overview, stats } = data;
+        const active = OVERVIEW_TABS.find(t => t.id === tabId) ?? OVERVIEW_TABS[0];
+
+        if (!overview || overview.playerCount === 0) {
+            return [
+                h("h1", {}, "Overzicht"),
+                h("p", { class: "subtitle" }, "Wat spelers op deze server doen."),
+                h("div", { class: "card" }, empty("Nog geen data",
+                    "Join de server en breek een paar blokken. Dit dashboard ververst vanzelf.")),
+            ];
+        }
+
+        const topCause = overview.topDeathCauses[0];
         return [
             h("h1", {}, "Overzicht"),
             h("p", { class: "subtitle" }, "Wat spelers op deze server doen."),
@@ -276,14 +352,10 @@
                 kpi("Mobs gedood", nf.format(overview.mobKills),
                     overview.pvpKills ? `en ${nf.format(overview.pvpKills)} spelers` : null),
                 kpi("Doodgegaan", nf.format(overview.deaths), topCause ? `meestal: ${deathCause(topCause.key)}` : null),
-                kpi("Spelers", nf.format(overview.playerCount)),
-                kpi("Meest gebroken blok", top ? pretty(top.key) : "–")),
-            h("div", { class: "grid" },
-                card("Spelers", h("div", { class: "table-wrap" }, table), true),
-                card("Meest gebroken blokken", barList(overview.topBlocks)),
-                card("Meest geplaatste blokken", barList(overview.topPlaced)),
-                card("Meest gedode mobs", barList(overview.topMobs)),
-                card("Doodsoorzaken", barList(overview.topDeathCauses, deathCause))),
+                kpi("Spelers", nf.format(overview.playerCount),
+                    stats.sessions ? `${nf.format(stats.sessions)} sessies, gem. ${duration(stats.playtimeMs / stats.sessions)}` : null)),
+            tabBar("Gegevens van de server", OVERVIEW_TABS, active, "#/overzicht"),
+            ...blockGrid(active.blocks(data)),
         ];
     }
 
@@ -303,10 +375,28 @@
                     h("td", {}, s.endedAt == null ? h("span", { class: "live" }, "● Speelt nog") : endReason(s.endReason)))))));
     }
 
-    /** Laatst opgehaalde speler, zodat wisselen van tabblad niet op de server hoeft te wachten. */
-    let cachedPlayer = { uuid: null, detail: null };
+    /** Laatst opgehaalde data per pagina, zodat wisselen van tabblad niet op de server hoeft te wachten. */
+    let cachedPage = { key: null, data: null };
 
-    /** Tabbladen van de spelerspagina. Elk geeft blokken {title, content, wide?, empty?} terug. */
+    async function pageData(key, useCache, load) {
+        if (!useCache || cachedPage.key !== key) {
+            const data = await load(); // eerst laden: bij een fout blijft de oude cache kloppen
+            cachedPage = { key, data };
+        }
+        return cachedPage.data;
+    }
+
+    function tabBar(label, tabs, active, base) {
+        return h("nav", { class: "tabs", "aria-label": label }, tabs.map(t =>
+            h("a", {
+                href: `${base}/${t.id}`,
+                class: t === active ? "active" : null,
+                "aria-current": t === active ? "page" : null,
+                "data-tab": t.id,
+            }, t.label)));
+    }
+
+    /** Tabbladen van de spelerspagina. Elk maakt van {detail, stats} blokken {title, content, wide?, empty?}. */
     const PLAYER_TABS = [
         { id: "activiteit", label: "Activiteit", blocks: activityBlocks },
         { id: "blokken", label: "Blokken", blocks: blockBlocks },
@@ -316,10 +406,12 @@
     ];
 
     async function renderPlayer(uuid, tabId, useCache) {
-        if (!useCache || cachedPlayer.uuid !== uuid) {
-            cachedPlayer = { uuid, detail: await api(`/api/players/${encodeURIComponent(uuid)}?days=${DAYS}`) };
-        }
-        const detail = cachedPlayer.detail;
+        const { detail, stats } = await pageData(uuid, useCache, async () => {
+            const [detail, stats] = await Promise.all([
+                api(`/api/players/${encodeURIComponent(uuid)}?days=${DAYS}`),
+                api(`/api/stats?player=${encodeURIComponent(uuid)}&days=${DAYS}`)]);
+            return { detail, stats };
+        });
         const back = h("a", { href: "#/", class: "back" }, "← Overzicht");
 
         if (!detail) {
@@ -343,14 +435,8 @@
                 kpi("Blokken gebroken", nf.format(p.totalBreaks), `${nf.format(p.totalPlaced)} geplaatst`),
                 kpi("Mobs gedood", nf.format(p.mobKills), p.pvpKills ? `en ${nf.format(p.pvpKills)} spelers` : null),
                 kpi("Doodgegaan", nf.format(p.deaths), topCause ? `meestal: ${deathCause(topCause.key)}` : null)),
-            h("nav", { class: "tabs", "aria-label": "Gegevens van deze speler" }, PLAYER_TABS.map(t =>
-                h("a", {
-                    href: `#/speler/${uuid}/${t.id}`,
-                    class: t === active ? "active" : null,
-                    "aria-current": t === active ? "page" : null,
-                    "data-tab": t.id,
-                }, t.label))),
-            ...blockGrid(active.blocks(detail)),
+            tabBar("Gegevens van deze speler", PLAYER_TABS, active, `#/speler/${uuid}`),
+            ...blockGrid(active.blocks({ detail, stats })),
         ];
     }
 
@@ -369,16 +455,40 @@
         ].filter(Boolean);
     }
 
-    function activityBlocks(d) {
+    function playtimeBlocks(stats) {
         return [
-            { title: `Blokken per dag (laatste ${DAYS} dagen)`, content: columnChart(perDay(d.activity, DAYS), 2) },
-            { title: "Wanneer speelt deze speler?", content: columnChart(perHourOfDay(d.activity), 3) },
-            { title: "Laatste sessies", content: sessionTable(d.sessions || []), wide: true },
+            { title: `Speeltijd per dag (laatste ${DAYS} dagen)`,
+                content: stackedChart(playtimePerDay(stats.intervals, DAYS), ["Actief", "AFK"], 2) },
+            bars("Actief of AFK", [
+                { key: "Actief", amount: Math.max(0, stats.playtimeMs - stats.afkMs) },
+                { key: "AFK", amount: stats.afkMs },
+            ], asIs, duration),
         ];
     }
 
-    function blockBlocks(d) {
+    function blocksPerDayBlock(stats) {
+        return { title: `Gebroken en geplaatst per dag (laatste ${DAYS} dagen)`, wide: true,
+            content: stackedChart(blocksPerDay(stats.blocks, DAYS), ["Gebroken", "Geplaatst"], 2) };
+    }
+
+    function movementBlock(stats) {
+        return bars("Afgelegde afstand (geschat)", stats.movement, movementType, blockDistance);
+    }
+
+    function activityBlocks({ detail, stats }) {
+        const [perDayBlock, afkBlock] = playtimeBlocks(stats);
         return [
+            perDayBlock,
+            { title: "Wanneer speelt deze speler?", content: columnChart(perHourOfDay(detail.activity), 3) },
+            afkBlock,
+            movementBlock(stats),
+            { title: "Laatste sessies", content: sessionTable(detail.sessions || []), wide: true },
+        ];
+    }
+
+    function blockBlocks({ detail: d, stats }) {
+        return [
+            blocksPerDayBlock(stats),
             bars("Meest gebroken blokken", d.topBlocks),
             bars("Meest geplaatste blokken", d.topPlaced),
             bars("Gereedschap", d.tools),
@@ -386,31 +496,32 @@
         ];
     }
 
-    function combatBlocks(d) {
+    function combatBlocks({ detail, stats }) {
         return [
-            bars("Gedode mobs", d.mobKills),
-            bars("Gedode spelers", d.pvpVictims, asIs),
-            bars("Doodsoorzaken", d.deathCauses, deathCause),
-            bars("Schade uitgedeeld", d.health.damageDealt, pretty, hearts),
-            bars("Schade gekregen", d.health.damageTaken, deathCause, hearts),
-            bars("Genezing", d.health.healed, healReason, hearts),
+            bars("Gedode mobs", stats.mobKills),
+            bars("Gedode spelers", stats.pvpVictims, asIs),
+            bars("Doodsoorzaken", stats.deathCauses, deathCause),
+            bars("Schade uitgedeeld", stats.health.damageDealt, pretty, hearts),
+            bars("Schade gekregen", stats.health.damageTaken, deathCause, hearts),
+            bars("Genezing", stats.health.healed, healReason, hearts),
+            { title: "Laatste doden", wide: true, empty: !stats.deaths.length, content: deathTable(stats.deaths, !detail) },
         ];
     }
 
-    function itemBlocks(d) {
+    function itemBlocks({ stats }) {
         return [
-            bars("Gecraft", d.crafting.crafted),
-            bars("Gesmolten", d.crafting.smelted),
-            bars("Gegeten", d.health.food),
-            bars("Gevangen bij het vissen", d.catches),
-            bars("Geënchant", d.crafting.enchanted),
-            bars("Aambeeld", d.crafting.anvil, anvilOperation),
-            bars("Gebrouwen", d.crafting.brewed),
+            bars("Gecraft", stats.crafting.crafted),
+            bars("Gesmolten", stats.crafting.smelted),
+            bars("Gegeten", stats.health.food),
+            bars("Gevangen bij het vissen", stats.catches),
+            bars("Geënchant", stats.crafting.enchanted),
+            bars("Aambeeld", stats.crafting.anvil, anvilOperation),
+            bars("Gebrouwen", stats.crafting.brewed),
         ];
     }
 
     /** Uit de positie-samples: werelden, biomen, ondergronds, voertuigen en met wie. */
-    function placeBlocks({ player, places }) {
+    function placeBlocks({ detail: { player, places } }) {
         if (!places || !places.sampledMs) {
             return [{ title: "Waar speelt deze speler?", wide: true, content: h("p", { class: "muted" },
                 "Nog geen positie-data. Zolang de speler online is, wordt elke paar seconden vastgelegd waar hij is.") }];
@@ -689,6 +800,13 @@
 
     const PLAYER_ROUTE = /^#\/speler\/([0-9a-fA-F-]{36})(?:\/([a-z]+))?$/;
 
+    const OVERVIEW_ROUTE = /^(?:#\/?|)(?:#\/overzicht\/([a-z]+))?$/;
+
+    /** Wat dezelfde pagina is, ook met een ander tabblad. */
+    function pageKey(hash) {
+        return hash.match(PLAYER_ROUTE)?.[1] ?? (OVERVIEW_ROUTE.test(hash) ? "overview" : null);
+    }
+
     async function render(useCache = false) {
         const id = ++renderId;
         updateNav();
@@ -698,7 +816,7 @@
         try {
             const content = isMapRoute() ? await renderMap()
                 : heat ? await renderHeatmap(heat[1], heat[2])
-                : match ? await renderPlayer(match[1], match[2], useCache) : await renderOverview();
+                : match ? await renderPlayer(match[1], match[2], useCache) : await renderOverview(location.hash.match(OVERVIEW_ROUTE)?.[1], useCache);
             if (id !== renderId) return; // inmiddels naar een andere pagina genavigeerd
             const focusedTab = document.activeElement?.dataset?.tab; // toetsenbordfocus niet kwijtraken
             app.replaceChildren(...content);
@@ -717,9 +835,8 @@
     }
 
     window.addEventListener("hashchange", event => {
-        const from = new URL(event.oldURL).hash.match(PLAYER_ROUTE);
-        const to = location.hash.match(PLAYER_ROUTE);
-        if (from && to && from[1] === to[1]) { // ander tabblad van dezelfde speler
+        const key = pageKey(location.hash);
+        if (key && key === pageKey(new URL(event.oldURL).hash)) { // ander tabblad van dezelfde pagina
             render(true);
             return;
         }

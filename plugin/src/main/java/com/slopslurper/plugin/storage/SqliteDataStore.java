@@ -7,6 +7,7 @@ import com.slopslurper.plugin.storage.stats.Overview;
 import com.slopslurper.plugin.storage.stats.PlayerDetail;
 import com.slopslurper.plugin.storage.stats.PlayerSummary;
 import com.slopslurper.plugin.storage.stats.PositionHeat;
+import com.slopslurper.plugin.storage.stats.Stats;
 
 import java.io.File;
 import java.sql.Connection;
@@ -17,7 +18,9 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.UUID;
@@ -422,6 +425,129 @@ public final class SqliteDataStore implements DataStore {
         });
     }
 
+    @Override
+    public CompletableFuture<Stats> getStats(UUID player, int limit, long since) {
+        String id = player == null ? null : player.toString();
+        return query(() -> {
+            String sessions = " FROM sessions" + (id == null ? "" : " WHERE player_uuid = ?");
+            Object[] who = id == null ? new Object[0] : new Object[]{id};
+            return new Stats(
+                    single("SELECT COUNT(*)" + sessions, who),
+                    single("SELECT COALESCE(SUM(" + SESSION_DURATION + "), 0)" + sessions, who),
+                    single("SELECT COALESCE(SUM(afk_ms), 0)" + sessions, who),
+                    intervals(id, since),
+                    blocksPerHour(id, since),
+                    topSubtypes(EventTypes.MOB_KILL, id, limit),
+                    topSubtypes(EventTypes.PVP_KILL, id, limit),
+                    topSubtypes(EventTypes.DEATH, id, limit),
+                    health(id, limit),
+                    crafting(id, limit),
+                    topSubtypes(EventTypes.FISH, id, limit),
+                    movement(id),
+                    deaths(id, limit));
+        });
+    }
+
+    /** Voegt {@code AND player_uuid = ?} toe als er een speler is. */
+    private PreparedStatement prepareFor(String player, String select, String rest, Object... params) throws SQLException {
+        if (player == null) {
+            return prepare(select + rest, params);
+        }
+        List<Object> all = new ArrayList<>(List.of(params));
+        all.add(0, player);
+        return prepare(select + " AND player_uuid = ?" + rest, all.toArray());
+    }
+
+    private List<Stats.Interval> intervals(String player, long since) throws SQLException {
+        List<Stats.Interval> result = new ArrayList<>();
+        try (PreparedStatement ps = prepareFor(player,
+                "SELECT started_at, COALESCE(ended_at, last_seen_at) AS until, afk_ms FROM sessions WHERE 1 = 1",
+                " AND COALESCE(ended_at, last_seen_at) >= ? ORDER BY started_at", since);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                result.add(new Stats.Interval(rs.getLong(1), rs.getLong(2), rs.getLong(3)));
+            }
+        }
+        return result;
+    }
+
+    private List<Stats.BlockBucket> blocksPerHour(String player, long since) throws SQLException {
+        List<Stats.BlockBucket> result = new ArrayList<>();
+        try (PreparedStatement ps = prepareFor(player,
+                "SELECT (created_at / 3600000) * 3600000 AS hour, "
+                        + "SUM(type = '" + EventTypes.BLOCK_BREAK + "'), SUM(type = '" + EventTypes.BLOCK_PLACE + "') "
+                        + "FROM events WHERE type IN ('" + EventTypes.BLOCK_BREAK + "', '" + EventTypes.BLOCK_PLACE + "')",
+                " AND created_at >= ? GROUP BY hour ORDER BY hour", since);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                result.add(new Stats.BlockBucket(rs.getLong(1), rs.getLong(2), rs.getLong(3)));
+            }
+        }
+        return result;
+    }
+
+    private List<Stats.Death> deaths(String player, int limit) throws SQLException {
+        List<Stats.Death> result = new ArrayList<>();
+        try (PreparedStatement ps = prepareFor(player,
+                "SELECT player_name, subtype, world, x, y, z, created_at FROM events WHERE type = '" + EventTypes.DEATH + "'",
+                " ORDER BY created_at DESC LIMIT ?", limit);
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) {
+                result.add(new Stats.Death(rs.getString(1), rs.getString(2), rs.getString(3),
+                        getInt(rs, 4), getInt(rs, 5), getInt(rs, 6), rs.getLong(7)));
+            }
+        }
+        return result;
+    }
+
+    private static Integer getInt(ResultSet rs, int column) throws SQLException {
+        int value = rs.getInt(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    /**
+     * Schatting van de afgelegde afstand: rechte lijnen tussen opeenvolgende positie-samples.
+     * Bochten tellen dus niet mee. Gaten (uitgelogd, dood), wereldwissels en onmogelijk hoge
+     * snelheden (teleports) slaan we over.
+     */
+    private List<CountEntry> movement(String player) throws SQLException {
+        Map<String, Double> blocks = new LinkedHashMap<>();
+        try (PreparedStatement ps = prepareFor(player,
+                "SELECT player_uuid, world, x, y, z, vehicle, game_mode, interval_ms, created_at FROM position_samples WHERE 1 = 1",
+                " ORDER BY player_uuid, created_at");
+             ResultSet rs = ps.executeQuery()) {
+            String lastPlayer = null, lastWorld = null;
+            int lastX = 0, lastY = 0, lastZ = 0;
+            long lastTime = 0;
+            while (rs.next()) {
+                String uuid = rs.getString(1), world = rs.getString(2);
+                int x = rs.getInt(3), y = rs.getInt(4), z = rs.getInt(5);
+                String vehicle = rs.getString(6), mode = rs.getString(7);
+                long interval = rs.getLong(8), time = rs.getLong(9);
+                long elapsed = time - lastTime;
+                if (uuid.equals(lastPlayer) && world.equals(lastWorld) && elapsed > 0 && elapsed <= interval * 3 / 2) {
+                    boolean flying = "CREATIVE".equals(mode) || "SPECTATOR".equals(mode);
+                    String how = vehicle != null ? vehicle : flying ? "CREATIVE" : "FOOT";
+                    double maxPerSecond = vehicle != null ? 100 : flying ? 40 : 12;
+                    double distance = Math.sqrt(Math.pow(x - lastX, 2) + Math.pow(y - lastY, 2) + Math.pow(z - lastZ, 2));
+                    if (distance <= maxPerSecond * elapsed / 1000) {
+                        blocks.merge(how, distance, Double::sum);
+                    }
+                }
+                lastPlayer = uuid;
+                lastWorld = world;
+                lastX = x;
+                lastY = y;
+                lastZ = z;
+                lastTime = time;
+            }
+        }
+        return blocks.entrySet().stream()
+                .map(e -> new CountEntry(e.getKey(), Math.round(e.getValue())))
+                .sorted((a, b) -> Long.compare(b.amount(), a.amount()))
+                .toList();
+    }
+
     /** Duur van een sessie; bij een lopende sessie tot de laatste tussenstand. */
     private static final String SESSION_DURATION = "(COALESCE(ended_at, last_seen_at) - started_at)";
 
@@ -491,8 +617,11 @@ public final class SqliteDataStore implements DataStore {
 
     /** Als {@link #topSubtypes}, maar telt {@code value} op (aantal items, levenspunten) in plaats van rijen. */
     private List<CountEntry> topValues(String type, String player, int limit) throws SQLException {
-        return counts("SELECT subtype, ROUND(SUM(value)) AS n FROM events WHERE type = ? AND player_uuid = ? "
-                + "GROUP BY subtype ORDER BY n DESC LIMIT ?", type, player, limit);
+        String select = "SELECT subtype, ROUND(SUM(value)) AS n FROM events WHERE type = ? ";
+        String group = "GROUP BY subtype ORDER BY n DESC LIMIT ?";
+        return player == null
+                ? counts(select + group, type, limit)
+                : counts(select + "AND player_uuid = ? " + group, type, player, limit);
     }
 
     private long single(String sql, Object... params) throws SQLException {
