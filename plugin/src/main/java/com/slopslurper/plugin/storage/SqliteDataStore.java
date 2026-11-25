@@ -318,8 +318,26 @@ public final class SqliteDataStore implements DataStore {
                     topSubtypes(EventTypes.PVP_KILL, id, limit),
                     topSubtypes(EventTypes.DEATH, id, limit),
                     topSubtypes(EventTypes.FISH, id, limit),
-                    activity, recent, places(id, limit)));
+                    activity, recent, places(id, limit),
+                    health(id, limit), crafting(id, limit)));
         });
+    }
+
+    private PlayerDetail.Health health(String id, int limit) throws SQLException {
+        return new PlayerDetail.Health(
+                topValues(EventTypes.DAMAGE_DEALT, id, limit),
+                topValues(EventTypes.DAMAGE_TAKEN, id, limit),
+                topValues(EventTypes.HEAL, id, limit),
+                topSubtypes(EventTypes.EAT, id, limit));
+    }
+
+    private PlayerDetail.Crafting crafting(String id, int limit) throws SQLException {
+        return new PlayerDetail.Crafting(
+                topValues(EventTypes.CRAFT, id, limit),
+                topValues(EventTypes.SMELT, id, limit),
+                topSubtypes(EventTypes.ENCHANT, id, limit),
+                topSubtypes(EventTypes.ANVIL, id, limit),
+                topValues(EventTypes.BREW, id, limit));
     }
 
     /** Waar de speler zijn tijd doorbrengt, uit {@code position_samples}. */
@@ -442,6 +460,12 @@ public final class SqliteDataStore implements DataStore {
                         + "GROUP BY subtype ORDER BY n DESC LIMIT ?", type, limit)
                 : counts("SELECT subtype, COUNT(*) AS n FROM events WHERE type = ? AND player_uuid = ? "
                         + "GROUP BY subtype ORDER BY n DESC LIMIT ?", type, player, limit);
+    }
+
+    /** Als {@link #topSubtypes}, maar telt {@code value} op (aantal items, levenspunten) in plaats van rijen. */
+    private List<CountEntry> topValues(String type, String player, int limit) throws SQLException {
+        return counts("SELECT subtype, ROUND(SUM(value)) AS n FROM events WHERE type = ? AND player_uuid = ? "
+                + "GROUP BY subtype ORDER BY n DESC LIMIT ?", type, player, limit);
     }
 
     private long single(String sql, Object... params) throws SQLException {

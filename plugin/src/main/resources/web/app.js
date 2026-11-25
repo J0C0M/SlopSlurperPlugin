@@ -125,6 +125,29 @@
 
     const asIs = key => key;
 
+    /** Levenspunten -> harten: 7 -> "3,5 ♥" */
+    const hearts = points => `${nf.format(points / 2)} ♥`;
+
+    function healReason(key) {
+        return {
+            SATIATED: "Volle hongerbalk",
+            REGEN: "Vredige wereld",
+            MAGIC: "Genezingsdrank",
+            MAGIC_REGEN: "Regeneratie",
+            EATING: "Eten",
+            CUSTOM: "Anders",
+        }[key] ?? pretty(key);
+    }
+
+    function anvilOperation(key) {
+        return {
+            RENAME: "Hernoemd",
+            REPAIR: "Gerepareerd",
+            COMBINE: "Gecombineerd",
+            ENCHANT: "Enchantment uit boek",
+        }[key] ?? pretty(key);
+    }
+
     /** 0.25 -> "25%" */
     function percent(part, total) {
         return total ? `${Math.round((part / total) * 100)}%` : "–";
@@ -324,6 +347,15 @@
                 card("Doodsoorzaken", barList(detail.deathCauses, deathCause)),
                 card("Gevangen bij het vissen", barList(detail.catches)),
                 detail.pvpVictims.length ? card("Gedode spelers", barList(detail.pvpVictims, asIs)) : null,
+                card("Schade uitgedeeld", barList(detail.health.damageDealt, pretty, hearts)),
+                card("Schade gekregen", barList(detail.health.damageTaken, deathCause, hearts)),
+                card("Genezing", barList(detail.health.healed, healReason, hearts)),
+                card("Gegeten", barList(detail.health.food)),
+                card("Gecraft", barList(detail.crafting.crafted)),
+                card("Gesmolten", barList(detail.crafting.smelted)),
+                card("Geënchant", barList(detail.crafting.enchanted)),
+                card("Aambeeld", barList(detail.crafting.anvil, anvilOperation)),
+                card("Gebrouwen", barList(detail.crafting.brewed)),
                 ...placeCards(places)),
         ];
     }
