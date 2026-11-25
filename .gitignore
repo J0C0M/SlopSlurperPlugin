@@ -15,6 +15,11 @@ session.lock
 /server-template/plugins/*
 !/server-template/plugins/.gitkeep
 
+# Testbots: npm-afhankelijkheden
+/bots/node_modules/
+# Testbots: mijlpalen en plekken (per lokale wereld)
+/bots/state/
+
 # IDE / OS
 .idea/
 *.iml

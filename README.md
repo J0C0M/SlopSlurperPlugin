@@ -49,9 +49,105 @@ Opties:
 | `-Reset` | `--reset` | Gooit `run/` weg en begint opnieuw met de verse templatewereld |
 | `-NoBuild` | `--no-build` | Start zonder de plugin opnieuw te bouwen |
 | `-NoBlueMap` | `--no-bluemap` | BlueMap (3D-kaart) niet downloaden |
+| `-Bots` | `--bots` | Offline mode en alleen bereikbaar vanaf je eigen pc, zodat de testbots kunnen inloggen (zie [Testbots](#testbots)) |
 | `-Memory 4G` | `MEMORY=4G ./start-server.sh` | Meer geheugen voor de server |
 
 Als PowerShell het script blokkeert, start je het met `powershell -ExecutionPolicy Bypass -File .\start-server.ps1`.
+
+## Testbots
+
+Wil je data verzamelen zonder zelf uren te spelen? In `bots/` staan bots die als echte spelers inloggen (met [Mineflayer](https://github.com/PrismarineJS/mineflayer)). De plugin ziet ze als gewone spelers, dus alle trackers vangen hun data op: sessies, AFK, gebroken en geplaatste blokken, kills, doden en posities.
+
+Je hebt **Node.js 22** of nieuwer nodig ([nodejs.org](https://nodejs.org/)).
+
+1. Start de server in botmodus:
+   ```powershell
+   .\start-server.ps1 -Bots
+   ```
+2. Start in een tweede venster de bots:
+   ```powershell
+   .\start-bots.ps1
+   ```
+   De eerste keer worden de afhankelijkheden geïnstalleerd. Stoppen doe je met Ctrl+C.
+
+Mac/Linux: `./start-server.sh --bots` en `./start-bots.sh`.
+
+**Hoeveel bots?** Gebruik er 4 of 5; met 5 is 20 minuten getest. Alle bots draaien in één Node-proces. Met 16 bots liep dat na een paar minuten vast met "heap out of memory" en kregen alle bots "Timed out". Daarna zijn de zichtafstand (5 chunks) en de rekentijd per route verkleind, maar meer dan 5 bots is sindsdien niet getest. Reken op 15 tot 25 minuten voordat de snelste bots ijzer hebben.
+
+**Meekijken.** De bots hebben zelf geen beeld (headless), maar je kunt als speler meedoen: verbind in Minecraft met `localhost`. Typ in de serverconsole `gamemode spectator <jouw naam>` en `tp <jouw naam> Bot_1`.
+
+**Wat de bots doen.** Elke bot werkt een doelenpad af, van lege handen tot ijzer: hout, houten en stenen gereedschap (ook een schep), oven, vlees jagen en bakken, kolen, fakkels, ijzer mijnen en smelten, en daarna ijzeren gereedschap en armor. Tussendoor doen ze ook andere dingen: rondlopen, mobs aanvallen, vrienden opzoeken, chatten en stilstaan (soms lang genoeg om AFK te worden). Ze leren niet: het pad staat vast in de code.
+
+| Speelstijl | Verschil |
+|---|---|
+| `miner` | werkt het meest aan zijn doelen; eerst de pickaxe, dan armor |
+| `builder` | verzamelt eerst 64 cobblestone |
+| `fighter` | eerst zwaard, schild en armor; vecht veel |
+| `explorer` | loopt veel rond |
+| `lazy` | staat vaak stil en stopt na pickaxe en zwaard |
+
+Het volgende doel volgt uit wat een bot bij zich heeft. Na uitloggen gaat hij dus verder waar hij was. Gaat hij dood, dan probeert hij één keer zijn spullen op te halen; lukt dat niet, dan begint hij bij een eerdere stap. Wie nog geen armor heeft, werkt 's nachts ondergronds of schuilt in een gat. Erts mijnen ze alleen als het aan lucht grenst, dus niet dwars door steen heen gezien. Mijlpalen staan in de log en in `bots/state/`.
+
+**Grind en zand.** Bots graven liever niet onder grind of zand door. Moet het toch, dan blijven ze staan tot alles is nagevallen en weggehakt. Komt hun hoofd toch in een blok, dan hakken ze zich eerst vrij.
+
+**Samen spelen.** Elke bot heeft twee vrienden (de bots naast hem: `Bot_2` is bevriend met `Bot_1` en `Bot_3`). Bots zoeken elkaar op als ze in de buurt en op ongeveer dezelfde hoogte zijn, nodigen elkaar uit en blijven dan een paar minuten bij elkaar: achter elkaar aan lopen, samen minen en samen mobs aanvallen. Dat zie je op het dashboard terug bij "met wie speelt iemand". Omdat ze vaak ondergronds zitten, gebeurt dit nog weinig.
+
+**Speelschema's (`-Schedule`).** Standaard spelen alle bots meteen, wat handig is om te testen. Met `-Schedule` heeft elke bot een eigen ritme en speelt hij alleen op zijn eigen tijden:
+
+| Schema | Wanneer |
+|---|---|
+| avondspeler | doordeweeks ±19:00–23:00, in het weekend 's middags en 's avonds |
+| scholier | doordeweeks na school en een stukje 's avonds, in het weekend overdag |
+| nachtbraker | ±21:00 tot 02:00 of later |
+| casual speler | korte sessies verspreid over de dag, niet elke dag |
+| weekendspeler | vooral zaterdag en zondag, lange sessies |
+
+Begin- en eindtijden schuiven per dag een beetje, en niet elke dag wordt er gespeeld. Bij het starten zie je per bot wanneer hij begint. Zo krijg je realistische activiteit per uur en per dag, maar dan moeten de bots wel lang (dagen) draaien.
+
+**Lopen en vastzitten.** Bots kiezen eerst een route waarbij ze niet graven of bouwen. Alleen als die er niet is, hakken ze door een heuvel of bouwen ze een opstapje. Dat lijkt meer op een echte speler en houdt de data schoon: blokken die alleen voor de route gebroken of geplaatst worden, komen anders ook in je trackers. Zit een bot toch vast, dan springt hij een andere kant op. Blijft hij op dezelfde plek vastzitten, dan logt hij uit en na een paar seconden weer in, en maakt hij zijn sessie af. Dat geeft een extra sessie in de data.
+
+Door afronding bij botsingen liep Mineflayer soms een blok in, waarna Paper de bot elke tick terugzette. Twee dingen lossen dat samen op: een fractie bredere hitbox (`playerHalfWidth` in `bots.js`) en een kleine marge in de botsingsberekening (`patches/prismarine-physics`). Haal geen van beide weg: dan lopen bots voortdurend vast.
+
+**Eigen huis (`-Homes`, experimenteel).** Elke bot kiest een vlakke plek, bouwt daar stap voor stap een huisje met werkbank en kist en keert er steeds naar terug om buit op te bergen. Bots breken elkaars huizen niet af. De plek wordt bewaard in `bots/state/`. Is er geen hout te bereiken, dan bouwt hij met aarde. Dit staat standaard uit, omdat het nog weinig getest is. Na `-Reset` gooi je ook `bots/state/` weg, anders gebruiken ze plekken uit de oude wereld.
+
+Opties:
+
+| PowerShell | Bash | Effect |
+|---|---|---|
+| `-Count 5` | `--count 5` | Aantal bots (standaard 4; zie "Hoeveel bots?"). Ze heten `Bot_1`, `Bot_2`, enzovoort |
+| `-Pvp` | `--pvp` | Bots vallen elkaar soms aan (nooit echte spelers, en nooit hun vrienden) |
+| `-Schedule` | `--schedule` | Bots spelen alleen op hun eigen speeltijden (zie hierboven) |
+| `-Homes` | `--homes` | Experimenteel: bots bouwen een eigen huis |
+| `--session-min 10 --session-max 40` | idem | Minuten online per sessie (zonder `-Schedule`) |
+| `--offline-min 1 --offline-max 10` | idem | Minuten offline tussen sessies (zonder `-Schedule`) |
+| `--prefix Test` | idem | Andere naam voor de bots (`Test_1`, ...) |
+| `--host` / `--port` | idem | Andere server (standaard `localhost:25565`) |
+| `--only social` | idem | Testhulp: bots doen alleen deze activiteit (`progress`, `mine`, `build`, `fight`, `explore`, `idle`, `chat`, `social`, `home`) |
+
+Wil je zien wat een bot precies doet, zet dan eerst `$env:BOTS_DEBUG=1` (Bash: `BOTS_DEBUG=1 ./start-bots.sh`).
+
+**Aan de bots werken.**
+
+| Bestand | Wat |
+|---|---|
+| `bots/bots.js` | De bots zelf: speelstijlen, activiteiten, samen spelen, huizen, lopen en losmaken |
+| `bots/progress.js` | Het doelenpad: verzamelen, maken, smelten, mijnen, eten en overleven |
+| `bots/schedule.js` | De speelschema's en hun tijden |
+| `bots/patches/` | Patches op `mineflayer-pathfinder` (van Mindcraft) en `prismarine-physics` (eigen fix). Die worden bij elke `npm ci` automatisch toegepast (via `patch-package`) |
+| `bots/state/` | Per bot zijn mijlpalen, mijningang en huis (niet in git) |
+
+De pathfinder-patch komt uit [Mindcraft](https://github.com/mindcraft-bots/mindcraft) (MIT-licentie). Ook het idee om eerst een route zonder graven en bouwen te zoeken, en opnieuw in te loggen als laatste redmiddel, komt daarvandaan. De patch:
+- repareert het neerzetten van opstapjes: de pathfinder bleef soms in "bouwen" hangen, of hield springen ingedrukt;
+- laat de bot pas doorlopen als hij dichter bij het midden van een blok staat, zodat hij minder hoekjes afsnijdt;
+- laat bots deuren, hekken en luiken openen, en langs ranken klimmen.
+
+Werk je een van die pakketten bij naar een nieuwe versie? Kijk dan of de patch nog nodig is en nog past. Een patch die niet meer past, laat `npm ci` mislukken.
+
+**Let op:**
+- In botmodus staat de server in **offline mode**: iedereen kan inloggen met elke naam, ook die van een op. Daarom luistert de server dan alleen op `127.0.0.1`, zodat alleen jouw eigen pc erop kan. Start je later weer zonder `-Bots`, dan zet het script online mode vanzelf terug.
+- Log je in botmodus zelf in, dan krijg je een andere UUID dan normaal. Je bent dan voor de plugin (en voor je inventory in de wereld) een andere speler.
+- Botdata komt in dezelfde `data.db` als echte data. Wil je ze later uit elkaar houden: de bots herken je aan hun naam. Of start met `-Reset` voor een schone database; let op, dat wist ook je hele wereld in `run/`.
+- De bots hakken en bouwen in je eigen wereld in `run/`. Is die je dierbaar, maak dan eerst een kopie.
 
 ## Werken aan de plugin
 
