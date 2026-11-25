@@ -12,6 +12,7 @@ import java.util.List;
  * @param blocks      gebroken en geplaatste blokken per uur in de gevraagde periode
  * @param movement    geschatte afstand in blokken per manier van verplaatsen: {@code FOOT},
  *                    {@code CREATIVE} of het voertuig
+ * @param interactions gebruikte blokken met aantal keer
  * @param deaths      de laatste doden met plek, nieuwste eerst
  */
 public record Stats(
@@ -27,8 +28,28 @@ public record Stats(
         PlayerDetail.Crafting crafting,
         List<CountEntry> catches,
         List<CountEntry> movement,
-        List<Death> deaths
+        List<Death> deaths,
+        Items items,
+        List<CountEntry> interactions,
+        long sleeps,
+        Progress progress
 ) {
+
+    /** {@code broken} in aantal keer, de rest in aantal items. */
+    public record Items(List<CountEntry> pickedUp, List<CountEntry> dropped, List<CountEntry> broken) {
+    }
+
+    /**
+     * @param xp           verdiende XP per bron
+     * @param levels       aantal keer een level omhoog (opgeteld)
+     * @param advancements de laatste advancements, nieuwste eerst
+     */
+    public record Progress(List<CountEntry> xp, long levels, List<Advancement> advancements) {
+    }
+
+    /** @param sinceJoinMs tijd sinds de eerste join, {@code playtimeMs} alleen de speeltijd */
+    public record Advancement(String player, String key, long time, long sinceJoinMs, long playtimeMs) {
+    }
 
     public record Interval(long start, long end, long afkMs) {
     }

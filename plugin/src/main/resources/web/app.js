@@ -129,6 +129,32 @@
         return { FOOT: "Te voet", CREATIVE: "Creative of spectator" }[key] ?? pretty(key);
     }
 
+    function xpSource(key) {
+        return {
+            ENTITY_DEATH: "Mobs", BLOCK_BREAK: "Blokken breken", FURNACE: "Smelten", BREED: "Fokken",
+            VILLAGER_TRADE: "Handelen", FISHING: "Vissen", EXP_BOTTLE: "XP-flesje",
+            GRINDSTONE: "Slijpsteen", PLAYER_DEATH: "Teruggehaald na dood",
+            UNKNOWN: "Onbekend", CUSTOM: "Anders",
+        }[key] ?? pretty(key);
+    }
+
+    /** 3 dagen of meer in dagen, anders als duur */
+    const longTime = ms => ms >= 3 * 86_400_000 ? `${Math.floor(ms / 86_400_000)} dagen` : duration(ms);
+
+    function advancementTable(advancements, showPlayer) {
+        return h("div", { class: "table-wrap" }, h("table", { class: "static" },
+            h("thead", {}, h("tr", {},
+                showPlayer ? h("th", {}, "Speler") : null,
+                h("th", {}, "Advancement"), h("th", {}, "Behaald"),
+                h("th", { class: "num" }, "Na eerste join"), h("th", { class: "num" }, "Na speeltijd"))),
+            h("tbody", {}, advancements.map(a => h("tr", {},
+                showPlayer ? h("td", {}, a.player ?? "–") : null,
+                h("td", { title: a.key }, pretty(a.key.split("/").pop())), // story/mine_stone -> "Mine stone"
+                h("td", {}, dateTimeFmt.format(new Date(a.time))),
+                h("td", { class: "num" }, longTime(a.sinceJoinMs)),
+                h("td", { class: "num" }, duration(a.playtimeMs)))))));
+    }
+
     /** 1500 -> "1,5 km" (één blok is één meter) */
     const blockDistance = m => m < 1000 ? `${nf.format(m)} m` : `${nf.format(Math.round(m / 100) / 10)} km`;
 
@@ -319,9 +345,12 @@
         { id: "blokken", label: "Blokken", blocks: ({ overview, stats }) => [
             blocksPerDayBlock(stats),
             bars("Meest gebroken blokken", overview.topBlocks),
-            bars("Meest geplaatste blokken", overview.topPlaced)] },
+            bars("Meest geplaatste blokken", overview.topPlaced),
+            usedBlock(stats)] },
         { id: "gevecht", label: "Gevecht", blocks: ({ stats }) => combatBlocks({ stats }) },
         { id: "items", label: "Items", blocks: ({ stats }) => itemBlocks({ stats }) },
+        { id: "crafting", label: "Crafting", blocks: ({ stats }) => craftingBlocks({ stats }) },
+        { id: "voortgang", label: "Voortgang", blocks: ({ stats }) => progressBlocks({ stats }) },
     ];
 
     async function renderOverview(tabId, useCache) {
@@ -402,6 +431,8 @@
         { id: "blokken", label: "Blokken", blocks: blockBlocks },
         { id: "gevecht", label: "Gevecht", blocks: combatBlocks },
         { id: "items", label: "Items", blocks: itemBlocks },
+        { id: "crafting", label: "Crafting", blocks: craftingBlocks },
+        { id: "voortgang", label: "Voortgang", blocks: progressBlocks },
         { id: "locaties", label: "Locaties", blocks: placeBlocks },
     ];
 
@@ -492,7 +523,23 @@
             bars("Meest gebroken blokken", d.topBlocks),
             bars("Meest geplaatste blokken", d.topPlaced),
             bars("Gereedschap", d.tools),
+            usedBlock(stats),
             bars("Gebroken per wereld", d.worlds, prettyWorld),
+        ];
+    }
+
+    function usedBlock(stats) {
+        const used = [...stats.interactions, { key: "SLEEP", amount: stats.sleeps }].sort((a, b) => b.amount - a.amount);
+        return bars("Gebruikte blokken", used, key => key === "SLEEP" ? "Geslapen" : pretty(key));
+    }
+
+    function progressBlocks({ detail, stats }) {
+        const { xp, levels, advancements } = stats.progress;
+        const xpBlock = bars("Verdiende XP", xp, xpSource);
+        if (levels) xpBlock.content = h("div", {}, h("p", { class: "muted" }, `Levels gestegen: ${nf.format(levels)}`), xpBlock.content);
+        return [
+            { ...xpBlock, wide: true },
+            { title: "Laatste advancements", wide: true, empty: !advancements.length, content: advancementTable(advancements, !detail) },
         ];
     }
 
@@ -510,10 +557,18 @@
 
     function itemBlocks({ stats }) {
         return [
-            bars("Gecraft", stats.crafting.crafted),
-            bars("Gesmolten", stats.crafting.smelted),
+            bars("Opgepakt", stats.items.pickedUp),
+            bars("Weggegooid", stats.items.dropped),
+            bars("Kapotgegaan", stats.items.broken),
             bars("Gegeten", stats.health.food),
             bars("Gevangen bij het vissen", stats.catches),
+        ];
+    }
+
+    function craftingBlocks({ stats }) {
+        return [
+            bars("Gecraft", stats.crafting.crafted),
+            bars("Gesmolten", stats.crafting.smelted),
             bars("Geënchant", stats.crafting.enchanted),
             bars("Aambeeld", stats.crafting.anvil, anvilOperation),
             bars("Gebrouwen", stats.crafting.brewed),

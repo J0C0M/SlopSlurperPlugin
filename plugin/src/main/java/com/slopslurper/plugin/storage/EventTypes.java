@@ -62,6 +62,30 @@ public final class EventTypes {
     /** Gebrouwen drankjes, op naam van wie de stand het laatst opende. subtype = drankje, item = soort fles, value = aantal, meta.ingredient. */
     public static final String BREW = "brew";
 
+    /** Opgeteld gebruik van blokken met rechtsklik. subtype = bloktype, value = aantal keer. */
+    public static final String INTERACT = "interact";
+
+    /** Speler gaat slapen. subtype = soort bed, plek = bed. */
+    public static final String SLEEP = "sleep";
+
+    /** Opgeteld opgepakte items. subtype = item, value = aantal. */
+    public static final String PICKUP = "pickup";
+
+    /** Opgeteld weggegooide items. subtype = item, value = aantal. */
+    public static final String DROP = "drop";
+
+    /** Gereedschap of armor gaat kapot. subtype = item. */
+    public static final String ITEM_BREAK = "item_break";
+
+    /** Opgeteld verdiende XP. subtype = bron (bijv. ENTITY_DEATH), value = XP. */
+    public static final String XP = "xp";
+
+    /** Level omhoog. subtype = het nieuwe level, value = aantal levels erbij. */
+    public static final String LEVEL = "level";
+
+    /** Advancement behaald. subtype = naam (bijv. story/mine_stone), meta: since_join_ms, playtime_ms. */
+    public static final String ADVANCEMENT = "advancement";
+
     /** Speler komt online. meta.session = sessie-id. */
     public static final String SESSION_START = "session_start";
 
