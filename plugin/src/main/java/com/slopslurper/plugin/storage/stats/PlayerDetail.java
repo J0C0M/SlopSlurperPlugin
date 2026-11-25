@@ -21,8 +21,29 @@ public record PlayerDetail(
         List<CountEntry> catches,
         List<ActivityBucket> activity,
         List<SessionInfo> sessions,
-        Places places
+        Places places,
+        Health health,
+        Crafting crafting
 ) {
+
+    /** Schade en genezing in levenspunten (2 = één hart), {@code food} in aantal keer gegeten. */
+    public record Health(
+            List<CountEntry> damageDealt,
+            List<CountEntry> damageTaken,
+            List<CountEntry> healed,
+            List<CountEntry> food
+    ) {
+    }
+
+    /** {@code enchanted} en {@code anvil} in aantal keer, de rest in aantal items. */
+    public record Crafting(
+            List<CountEntry> crafted,
+            List<CountEntry> smelted,
+            List<CountEntry> enchanted,
+            List<CountEntry> anvil,
+            List<CountEntry> brewed
+    ) {
+    }
 
     /** @param hourStart begin van het uur in epoch-milliseconden (UTC) */
     public record ActivityBucket(long hourStart, long count) {

@@ -70,6 +70,9 @@ De plugin slaat spelersdata op in `run/plugins/SlopSlurperPlugin/data.db` (SQLit
 | `block-place` | Elk geplaatst blok: type en plek. Event `block_place`. | – |
 | `kills` | Mobs en spelers die een speler doodt: type, wapen, plek en afstand. Events `mob_kill` en `pvp_kill`. | – |
 | `deaths` | Doodgaan: oorzaak (dader of schadetype, bijv. `ZOMBIE` of `FALL`), plek, verloren items, level en hoe lang de speler het volhield. Event `death`. | – |
+| `health` | Schade gedaan en gekregen (per mob of oorzaak), genezing en eten. Schade en genezing zijn opgeteld, in levenspunten (2 = één hart). Schade die door absorptie wordt opgevangen telt niet mee, taart eten ook niet. Events `damage_dealt`, `damage_taken`, `heal` en `eat`. | `flush-seconds` (60) |
+| `crafting` | Gecrafte items met het echte aantal (ook bij shift-klik), en of het aan een werkbank of in de inventory was. Event `craft`. | – |
+| `stations` | Smelten (item en aantal), enchanten (enchantments en levels), aambeeld (repareren, combineren, boek, hernoemen) en brouwen (op naam van wie de stand het laatst opende). Events `smelt`, `enchant`, `anvil` en `brew`. | – |
 | `positions` | Elke paar seconden per speler: wereld, positie, biome, ondergronds of niet, voertuig (boot, paard, minecart, elytra) en welke spelers in de buurt zijn. Eigen tabel `position_samples`. | `sample-seconds` (10), `nearby-radius` (32) |
 
 **Over AFK:** iemand is AFK na `afk-timeout-seconds` zonder echte input. Als input telt: rondkijken, zelf lopen, springen, klikken, interacties, inventory, chat, commando's, sneaken, sprinten en van hotbar-slot wisselen. Meegevoerd worden door water, een minecart of een boot telt niet, dus AFK-pools werken niet om speeltijd te faken. De AFK-tijd telt terug vanaf de laatste input: wie 3 minuten stilstaat, heeft 3 minuten AFK.
@@ -81,7 +84,7 @@ De plugin slaat spelersdata op in `run/plugins/SlopSlurperPlugin/data.db` (SQLit
 - **In-game:** `/blockstats` toont hoeveel blokken je gebroken en geplaatst hebt, en je top 10. `/blockstats <speler>` doet dat voor een ander (alleen voor op).
 - **Dashboard:** zodra de server draait, open je **http://localhost:8080/**.
   - **Overzicht:** alle spelers met speeltijd, gebroken en geplaatste blokken, kills en doden, plus de meest gebroken en geplaatste blokken, de meest gedode mobs en de doodsoorzaken.
-  - **Per speler:** speeltijd en AFK, de laatste sessies, activiteit per dag en per uur, blokken, gereedschap, gedode mobs en spelers, doodsoorzaken, en uit de posities: tijd per wereld en biome, ondergronds of bovengronds, tijd in voertuigen en met wie de speler het meest speelt.
+  - **Per speler:** speeltijd en AFK, de laatste sessies, activiteit per dag en per uur, blokken, gereedschap, gedode mobs en spelers, doodsoorzaken, schade, genezing, eten, crafting, smelten, enchanten, aambeeld, brouwen, en uit de posities: tijd per wereld en biome, ondergronds of bovengronds, tijd in voertuigen en met wie de speler het meest speelt.
   - De pagina ververst elke 10 seconden.
 
 Het dashboard is standaard alleen bereikbaar vanaf je eigen pc. De poort en het adres stel je in via `run/plugins/SlopSlurperPlugin/config.yml`.
@@ -107,7 +110,7 @@ Het dashboard haalt alles uit een JSON-API. Wil je later een andere frontend of 
 |---|---|
 | `GET /api/overview` | Totalen (blokken, kills, doden, speeltijd), top-blokken, top-mobs, doodsoorzaken en meest actieve spelers |
 | `GET /api/players` | Alle spelers met hun totalen, speeltijd en laatst actief |
-| `GET /api/players/{uuid}?days=14` | Details van één speler, met activiteit per uur over de laatste N dagen en `places` (tijd per wereld, biome, voertuig en met wie, in ms) |
+| `GET /api/players/{uuid}?days=14` | Details van één speler, met activiteit per uur over de laatste N dagen en `places` (tijd per wereld, biome, voertuig en met wie, in ms), `health` (schade en genezing in levenspunten, eten) en `crafting` |
 | `GET /api/heatmap[?player={uuid}]` | Gebroken blokken per chunk (wereld, chunk x/z, aantal, min/max y) |
 | `GET /api/config` | Instellingen voor de frontend, bijvoorbeeld of de 3D-kaart beschikbaar is |
 
