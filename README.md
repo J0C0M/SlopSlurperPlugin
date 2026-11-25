@@ -71,6 +71,7 @@ De plugin slaat spelersdata op in `run/plugins/SlopSlurperPlugin/data.db` (SQLit
 | `kills` | Mobs en spelers die een speler doodt: type, wapen, plek en afstand. Events `mob_kill` en `pvp_kill`. | – |
 | `deaths` | Doodgaan: oorzaak (dader of schadetype, bijv. `ZOMBIE` of `FALL`), plek, verloren items, level en hoe lang de speler het volhield. Event `death`. | – |
 | `health` | Schade gedaan en gekregen (per mob of oorzaak), genezing en eten. Schade en genezing zijn opgeteld, in levenspunten (2 = één hart). Schade die door absorptie wordt opgevangen telt niet mee, taart eten ook niet. Events `damage_dealt`, `damage_taken`, `heal` en `eat`. | `flush-seconds` (60) |
+| `crafting` | Gecrafte items met het echte aantal (ook bij shift-klik), en of het aan een werkbank of in de inventory was. Event `craft`. | – |
 | `positions` | Elke paar seconden per speler: wereld, positie, biome, ondergronds of niet, voertuig (boot, paard, minecart, elytra) en welke spelers in de buurt zijn. Eigen tabel `position_samples`. | `sample-seconds` (10), `nearby-radius` (32) |
 
 **Over AFK:** iemand is AFK na `afk-timeout-seconds` zonder echte input. Als input telt: rondkijken, zelf lopen, springen, klikken, interacties, inventory, chat, commando's, sneaken, sprinten en van hotbar-slot wisselen. Meegevoerd worden door water, een minecart of een boot telt niet, dus AFK-pools werken niet om speeltijd te faken. De AFK-tijd telt terug vanaf de laatste input: wie 3 minuten stilstaat, heeft 3 minuten AFK.

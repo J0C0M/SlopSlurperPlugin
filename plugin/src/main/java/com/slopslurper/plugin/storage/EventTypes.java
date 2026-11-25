@@ -47,6 +47,9 @@ public final class EventTypes {
     /** Speler eet iets. subtype = item, meta.food_level = honger vooraf. */
     public static final String EAT = "eat";
 
+    /** Speler craft iets. subtype = item, value = aantal, meta.grid = table of inventory. */
+    public static final String CRAFT = "craft";
+
     /** Speler komt online. meta.session = sessie-id. */
     public static final String SESSION_START = "session_start";
 

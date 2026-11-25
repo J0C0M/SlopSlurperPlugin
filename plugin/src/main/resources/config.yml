@@ -43,6 +43,9 @@ trackers:
     enabled: true
     # Schade en genezing worden in het geheugen opgeteld en zo vaak als totaal opgeslagen.
     flush-seconds: 60
+  # Gecrafte items met aantal, aan een werkbank of in de inventory.
+  crafting:
+    enabled: true
   # Elke paar seconden per speler: wereld, positie, biome, ondergronds, voertuig
   # en wie er in de buurt is. Basis voor "waar besteden spelers hun tijd".
   positions:
