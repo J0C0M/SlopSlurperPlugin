@@ -8,6 +8,7 @@
     --accent: #3f8f3a;
     --accent-soft: #d7ecd3;
     --bar: #5aa653;
+    --bar-2: #4a78c8;
     --bar-track: #e6eae3;
     --danger: #b3261e;
     --radius: 10px;
@@ -26,7 +27,8 @@
         --accent: #7cc774;
         --accent-soft: #24361f;
         --bar: #69b961;
-        --bar-track: #2a3029;
+        --bar-2: #6f9be8;
+    --bar-track: #2a3029;
         --danger: #f2b8b5;
         --shadow: none;
         color-scheme: dark;
@@ -267,7 +269,12 @@ h2 { font-size: 16px; margin: 0 0 14px; }
     font-size: 11px;
     color: var(--muted);
 }
-.column-labels span { flex: 1; min-width: 0; text-align: center; overflow: hidden; white-space: nowrap; }
+.column-labels span { flex: 1; min-width: 0; display: flex; justify-content: center; white-space: nowrap; }
+
+.column.stacked { flex-direction: column-reverse; justify-content: flex-start; align-items: stretch; gap: 1px; }
+.column-fill.series-1, .series-legend .series-1 { background: var(--bar-2); }
+.series-legend { display: flex; gap: 16px; font-size: 13px; color: var(--muted); }
+.series-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; background: var(--bar); }
 
 /* Tabel */
 .table-wrap { overflow-x: auto; }

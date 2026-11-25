@@ -83,7 +83,7 @@ De plugin slaat spelersdata op in `run/plugins/SlopSlurperPlugin/data.db` (SQLit
 
 - **In-game:** `/blockstats` toont hoeveel blokken je gebroken en geplaatst hebt, en je top 10. `/blockstats <speler>` doet dat voor een ander (alleen voor op).
 - **Dashboard:** zodra de server draait, open je **http://localhost:8080/**.
-  - **Overzicht:** alle spelers met speeltijd, gebroken en geplaatste blokken, kills en doden, plus de meest gebroken en geplaatste blokken, de meest gedode mobs en de doodsoorzaken.
+  - **Overzicht:** kerncijfers van de hele server, met tabbladen Spelers, Activiteit (speeltijd per dag, AFK, afstand), Blokken, Gevecht (ook de laatste doden met plek) en Items.
   - **Per speler:** verdeeld over de tabbladen Activiteit, Blokken, Gevecht, Items en Locaties: speeltijd en AFK, de laatste sessies, activiteit per dag en per uur, blokken, gereedschap, gedode mobs en spelers, doodsoorzaken, schade, genezing, eten, crafting, smelten, enchanten, aambeeld, brouwen, en uit de posities: tijd per wereld en biome, ondergronds of bovengronds, tijd in voertuigen en met wie de speler het meest speelt.
   - **Heatmap:** waar spelers hun tijd doorbrengen, per wereld en voor iedereen of één speler. Je kunt zoomen (scrollen of knoppen) en slepen.
   - De pagina ververst elke 10 seconden.
@@ -114,6 +114,7 @@ Het dashboard haalt alles uit een JSON-API. Wil je later een andere frontend of 
 | `GET /api/players/{uuid}?days=14` | Details van één speler, met activiteit per uur over de laatste N dagen en `places` (tijd per wereld, biome, voertuig en met wie, in ms), `health` (schade en genezing in levenspunten, eten) en `crafting` |
 | `GET /api/heatmap[?player={uuid}]` | Gebroken blokken per chunk (wereld, chunk x/z, aantal, min/max y) |
 | `GET /api/heatmap/positions[?player={uuid}&world={naam}]` | Doorgebrachte tijd per chunk (wereld, chunk x/z, tijd in ms), uit de positie-samples |
+| `GET /api/stats[?player={uuid}&days=14]` | Sessies, blokken per uur, gevecht, doden met plek, items en geschatte afstand, voor één speler of de hele server |
 | `GET /api/config` | Instellingen voor de frontend, bijvoorbeeld of de 3D-kaart beschikbaar is |
 
 ### Opbouw
